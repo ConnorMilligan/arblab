@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, getSignedCookie, setCookie, setSignedCookie } from 'hono/cookie';
+import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import { readFileSync } from 'node:fs';
 import type { DB } from './db.ts';
@@ -49,6 +50,7 @@ import {
   validateDisplayName,
   validatePassword,
 } from './domain/users.ts';
+import { LoginLimiter } from './ratelimit.ts';
 import { DAY, seasonOf } from './time.ts';
 import { leaderboardPage, loginPage, mePage, membersPage, messagePage, rulesPage, signupPage } from './views/account.ts';
 import type { Flash, PageCtx } from './views/layout.ts';
@@ -86,12 +88,14 @@ export function createApp(opts: AppOptions): Hono<Env> {
   const clock = opts.clock ?? Date.now;
   const cost = opts.bcryptCost ?? 11;
   const secure = opts.secureCookies ?? false;
+  const prefix = secure ? 'host' : undefined; // __Host- cookies can't be set by sibling subdomains
   const dummyHash = bcrypt.hashSync('not-the-password', cost);
   const assets = {
     'style.css': { body: readFileSync(new URL('../public/style.css', import.meta.url)), type: 'text/css; charset=utf-8' },
     'app.js': { body: readFileSync(new URL('../public/app.js', import.meta.url)), type: 'text/javascript; charset=utf-8' },
   };
 
+  const limiter = new LoginLimiter();
   const app = new Hono<Env>();
 
   app.use(
@@ -105,8 +109,10 @@ export function createApp(opts: AppOptions): Hono<Env> {
         baseUri: ["'none'"],
       },
       referrerPolicy: 'same-origin',
+      permissionsPolicy: { camera: [], microphone: [], geolocation: [], payment: [], usb: [] },
     }),
   );
+  app.use('*', bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.text('Request too large.', 413) }));
 
   app.get('/static/:file', (c) => {
     const asset = assets[c.req.param('file') as keyof typeof assets];
@@ -132,6 +138,8 @@ export function createApp(opts: AppOptions): Hono<Env> {
 
   // ---- helpers ----
 
+  const clientIp = (c: Context<Env>) => c.req.header('cf-connecting-ip');
+
   function sameOrigin(c: Context<Env>): boolean {
     const origin = c.req.header('origin');
     if (!origin) return true; // older browsers; the SameSite=Lax cookie still applies
@@ -143,7 +151,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
   }
 
   async function sessionUser(c: Context<Env>, now: number): Promise<User | null> {
-    const raw = await getSignedCookie(c, secret, SESSION_COOKIE);
+    const raw = await getSignedCookie(c, secret, SESSION_COOKIE, prefix);
     if (!raw) return null;
     const [id, version, issuedAt] = raw.split(':').map(Number);
     if (!(issuedAt + SESSION_TTL > now)) return null;
@@ -159,6 +167,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
       sameSite: 'Lax',
       path: '/',
       maxAge: SESSION_TTL / 1000,
+      prefix,
     });
   }
 
@@ -213,16 +222,28 @@ export function createApp(opts: AppOptions): Hono<Env> {
   app.post('/login', async (c) => {
     const form = await c.req.parseBody();
     const name = field(form, 'name');
+    const wait = limiter.retryAfter(name, clientIp(c), c.get('now'));
+    if (wait > 0) {
+      c.header('Retry-After', String(wait));
+      return c.html(
+        loginPage(ctx(c, { kind: 'error', message: `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).` }), name),
+        429,
+      );
+    }
     const user = getUserByName(db, name);
     const ok = await bcrypt.compare(field(form, 'password'), user?.password_hash ?? dummyHash);
-    if (!user || !ok) return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
+    if (!user || !ok) {
+      limiter.fail(name, clientIp(c), c.get('now'));
+      return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
+    }
     if (!user.is_active) return c.html(loginPage(ctx(c, { kind: 'error', message: 'This account has been deactivated.' }), name), 403);
+    limiter.succeed(name);
     await startSession(c, user.id);
     return c.redirect('/', 303);
   });
 
   app.post('/logout', (c) => {
-    deleteCookie(c, SESSION_COOKIE, { path: '/' });
+    deleteCookie(c, SESSION_COOKIE, { path: '/', secure, prefix });
     return c.redirect('/login', 303);
   });
 

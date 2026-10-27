@@ -85,6 +85,54 @@ describe('access', () => {
     expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(403);
   });
 
+  it('locks a name out after 5 failed logins, even for the right password, until the window passes', async () => {
+    member('Bob');
+    member('Cara');
+    const c = client();
+    for (let i = 0; i < 5; i++) expect((await c.post('/login', { name: 'Bob', password: 'nope' })).status).toBe(401);
+    const locked = await c.post('/login', { name: 'bob', password: PASSWORD });
+    expect(locked.status).toBe(429);
+    expect(Number(locked.headers.get('retry-after'))).toBeGreaterThan(0);
+    expect((await c.post('/login', { name: 'Cara', password: PASSWORD })).status).toBe(303);
+    now += 15 * 60_000 + 1;
+    expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(303);
+  });
+
+  it('limits one client address across many names', async () => {
+    member('Bob');
+    const c = client();
+    const from = (ip: string) => ({ 'cf-connecting-ip': ip });
+    const attempt = (name: string, ip: string) =>
+      app.request(`http://${HOST}/login`, {
+        method: 'POST',
+        body: new URLSearchParams({ name, password: 'nope' }),
+        headers: { host: HOST, origin: `http://${HOST}`, 'content-type': 'application/x-www-form-urlencoded', ...from(ip) },
+      });
+    for (let i = 0; i < 20; i++) expect((await attempt(`ghost${i}`, '203.0.113.9')).status).toBe(401);
+    expect((await attempt('ghost-new', '203.0.113.9')).status).toBe(429);
+    expect((await attempt('ghost-new', '203.0.113.10')).status).toBe(401);
+    expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(303);
+  });
+
+  it('rejects oversized request bodies', async () => {
+    const res = await client().post('/login', { name: 'Bob', password: 'x'.repeat(70_000) });
+    expect(res.status).toBe(413);
+  });
+
+  it('uses a __Host- session cookie when cookies are secure', async () => {
+    member('Bob');
+    const secureApp = createApp({ db, secret: 'test-secret-test-secret-test-secret', clock: () => now, bcryptCost: 4, secureCookies: true });
+    const res = await secureApp.request(`http://${HOST}/login`, {
+      method: 'POST',
+      body: new URLSearchParams({ name: 'Bob', password: PASSWORD }),
+      headers: { host: HOST, origin: `http://${HOST}`, 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const cookie = res.headers.getSetCookie().find((x) => x.includes('session'))!;
+    expect(cookie).toMatch(/^__Host-session=/);
+    expect(cookie).toMatch(/Secure/);
+    expect(cookie).toMatch(/HttpOnly/);
+  });
+
   it('logs a member out everywhere once deactivated', async () => {
     member('Admin', true);
     member('Bob');

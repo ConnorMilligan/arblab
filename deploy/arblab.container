@@ -1,0 +1,27 @@
+[Unit]
+Description=arblab play-points prediction market
+Wants=network-online.target
+After=network-online.target
+
+[Container]
+ContainerName=arblab
+Image=localhost/arblab:latest
+PublishPort=127.0.0.1:8080:8080
+EnvironmentFile=%h/arblab/env
+Volume=%h/arblab/data:/data:Z
+# Hardening: root in a rootless container is the unprivileged host user; also drop everything else.
+ReadOnly=true
+Tmpfs=/tmp
+DropCapability=ALL
+NoNewPrivileges=true
+PidsLimit=200
+Memory=512m
+HealthCmd=node -e "fetch('http://127.0.0.1:8080/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"
+HealthInterval=30s
+
+[Service]
+Restart=on-failure
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target

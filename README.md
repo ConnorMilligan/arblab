@@ -146,7 +146,7 @@ The spec left a few things open. These are the choices made (more detail in PLAN
 
 - No email: no notifications (a "Needs you" box on the home page lists opt-ins and jury duty), and
   no self-service password reset. The admin runs `reset-password`.
-- No login rate limiting. bcrypt makes each guess slow; add a limiter if the URL gets around.
+- Login rate limiting is per name (5 failures in 15 minutes locks that name out for the rest of the window; 60 failures across all names pauses logins), in memory, and cleared on restart. It is keyed by name, not IP, because behind a proxy every request shares one address. The cost is that someone who knows a member's name can lock them out for up to 15 minutes.
 - Markets and bets can't be edited, cancelled or deleted once created. No comments or discussion.
 - No pagination. Lists show up to 200 rows.
 - No migration tool. The schema is `CREATE TABLE IF NOT EXISTS`, so a future schema change needs a

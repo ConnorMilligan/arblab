@@ -44,7 +44,7 @@ export function validateDisplayName(raw: string): string {
 }
 
 export function validatePassword(pw: string): void {
-  rule(pw.length >= 8, 'Password must be at least 8 characters.');
+  rule(pw.length >= 10, 'Password must be at least 10 characters.');
   rule(pw.length <= 200, 'Password is too long.');
 }
 
