@@ -23,3 +23,16 @@ for (const input of document.querySelectorAll('input[data-epoch]')) {
 for (const input of document.querySelectorAll('.invites input')) {
   input.addEventListener('focus', () => input.select());
 }
+
+// Count down to the raffle draw, then reload to show the result. Counts from page load so a wrong clock doesn't matter.
+for (const el of document.querySelectorAll('[data-countdown]')) {
+  const end = Date.now() + Number(el.dataset.countdown);
+  const timer = setInterval(() => {
+    const left = end - Date.now();
+    el.textContent = `${Math.max(0, Math.ceil(left / 1000))}s`;
+    if (left <= -1000) {
+      clearInterval(timer);
+      location.reload();
+    }
+  }, 250);
+}

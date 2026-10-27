@@ -5,6 +5,19 @@ import { dirname } from 'node:path';
 export type DB = Database.Database;
 
 // All times are integer milliseconds since the epoch (UTC).
+function ledgerTable(name: string): string {
+  return `CREATE TABLE IF NOT EXISTS ${name} (
+  id INTEGER PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  type TEXT NOT NULL CHECK (type IN ('allowance', 'stake', 'winnings', 'refund', 'bond', 'bond_return', 'jury_reward', 'raffle_stake', 'raffle_win')),
+  amount INTEGER NOT NULL CHECK (amount <> 0),
+  market_id INTEGER REFERENCES markets(id),
+  created_at INTEGER NOT NULL,
+  CHECK ((type IN ('stake', 'bond', 'raffle_stake')) = (amount < 0)),
+  CHECK ((type IN ('allowance', 'raffle_stake', 'raffle_win')) = (market_id IS NULL))
+);`;
+}
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
@@ -79,16 +92,7 @@ CREATE INDEX IF NOT EXISTS bets_market ON bets(market_id);
 CREATE INDEX IF NOT EXISTS bets_user ON bets(user_id);
 
 -- Every balance change. Balances are SUM(amount); rows are never updated or deleted.
-CREATE TABLE IF NOT EXISTS ledger (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  type TEXT NOT NULL CHECK (type IN ('allowance', 'stake', 'winnings', 'refund', 'bond', 'bond_return', 'jury_reward')),
-  amount INTEGER NOT NULL CHECK (amount <> 0),
-  market_id INTEGER REFERENCES markets(id),
-  created_at INTEGER NOT NULL,
-  CHECK ((type IN ('stake', 'bond')) = (amount < 0)),
-  CHECK ((type = 'allowance') = (market_id IS NULL))
-);
+${ledgerTable('ledger')}
 CREATE INDEX IF NOT EXISTS ledger_user ON ledger(user_id);
 CREATE INDEX IF NOT EXISTS ledger_market ON ledger(market_id);
 CREATE TRIGGER IF NOT EXISTS ledger_no_update BEFORE UPDATE ON ledger
@@ -135,7 +139,37 @@ CREATE TABLE IF NOT EXISTS jurors (
   voted_at INTEGER,
   PRIMARY KEY (market_id, user_id)
 );
+
+-- Raffle rounds are the minute starting at round (ms). A member has one entry per round; entering again adds to it.
+CREATE TABLE IF NOT EXISTS raffle_entries (
+  round INTEGER NOT NULL,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  amount INTEGER NOT NULL CHECK (amount > 0),
+  PRIMARY KEY (round, user_id)
+);
+
+-- One row per round that had entries; its presence is what stops a round being drawn twice.
+CREATE TABLE IF NOT EXISTS raffle_draws (
+  round INTEGER PRIMARY KEY,
+  winner_id INTEGER NOT NULL REFERENCES users(id),
+  pot INTEGER NOT NULL,
+  ticket INTEGER NOT NULL,
+  entrants INTEGER NOT NULL,
+  drawn_at INTEGER NOT NULL
+);
 `;
+
+/** Databases made before raffles have a ledger whose CHECKs reject the raffle types: rebuild it. */
+function migrateLedger(db: DB): void {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'ledger'").get() as { sql: string } | undefined;
+  if (!row || row.sql.includes('raffle_win')) return;
+  db.transaction(() => {
+    db.exec(ledgerTable('ledger_new'));
+    db.exec('INSERT INTO ledger_new SELECT id, user_id, type, amount, market_id, created_at FROM ledger');
+    db.exec('DROP TABLE ledger'); // takes its indexes and triggers with it; SCHEMA recreates them
+    db.exec('ALTER TABLE ledger_new RENAME TO ledger');
+  })();
+}
 
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
@@ -143,6 +177,7 @@ export function openDb(path: string): DB {
   if (path !== ':memory:') db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
+  migrateLedger(db);
   db.exec(SCHEMA);
   return db;
 }

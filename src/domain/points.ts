@@ -2,7 +2,7 @@ import type { DB } from '../db.ts';
 import { weekStart } from '../time.ts';
 import { ALLOWANCE_CAP, WEEKLY_ALLOWANCE, rule } from './rules.ts';
 
-export type LedgerType = 'allowance' | 'stake' | 'winnings' | 'refund' | 'bond' | 'bond_return' | 'jury_reward';
+export type LedgerType = 'allowance' | 'stake' | 'winnings' | 'refund' | 'bond' | 'bond_return' | 'jury_reward' | 'raffle_stake' | 'raffle_win';
 
 export const LEDGER_LABELS: Record<LedgerType, string> = {
   allowance: 'Weekly allowance',
@@ -12,6 +12,8 @@ export const LEDGER_LABELS: Record<LedgerType, string> = {
   bond: 'Bond posted',
   bond_return: 'Bond returned',
   jury_reward: 'Juror reward',
+  raffle_stake: 'Raffle entry',
+  raffle_win: 'Raffle win',
 };
 
 /** Balances are always derived from the ledger. */
@@ -36,7 +38,7 @@ export function credit(db: DB, userId: number, type: LedgerType, amount: number,
 }
 
 /** Removes points, refusing to go below zero. Call inside a transaction. */
-export function debit(db: DB, userId: number, type: 'stake' | 'bond', amount: number, marketId: number, now: number): void {
+export function debit(db: DB, userId: number, type: 'stake' | 'bond' | 'raffle_stake', amount: number, marketId: number | null, now: number): void {
   rule(Number.isInteger(amount) && amount > 0, 'Amount must be a whole number of points above zero.');
   const balance = balanceOf(db, userId);
   rule(amount <= balance, `Not enough points: you have ${balance}, this needs ${amount}.`);

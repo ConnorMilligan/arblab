@@ -321,6 +321,29 @@ describe('markets over HTTP', () => {
   });
 });
 
+describe('raffle', () => {
+  it('lets members enter, draws when the minute ends, and refuses a bad entry', async () => {
+    const a = member('Ann');
+    const b = member('Bob');
+    const ann = client();
+    const bob = client();
+    await ann.login('Ann');
+    await bob.login('Bob');
+    await ann.post('/raffle/enter', { amount: '300' });
+    await bob.post('/raffle/enter', { amount: '200' });
+    expect(await ann.text('/raffle')).toContain('Pot: <b>500 pts</b>');
+
+    await bob.post('/raffle/enter', { amount: '5000' });
+    expect(await bob.text('/raffle')).toContain('Not enough points');
+
+    now += 60_000; // rng is 0, so the first ticket (Ann's) wins
+    const page = await ann.text('/raffle');
+    expect(page).toContain('Recent draws');
+    expect(balanceOf(db, a)).toBe(1200);
+    expect(balanceOf(db, b)).toBe(800);
+  });
+});
+
 describe('copy', () => {
   it('never mentions money anywhere in the app', async () => {
     seedDemo(db, now, hash);
@@ -331,7 +354,7 @@ describe('copy', () => {
     const token = (await a.text('/members')).match(/\/invite\/([\w-]+)/)![1];
     const paths = [
       '/', '/?tab=awaiting', '/?tab=resolved', '/markets/1', '/markets/2', '/markets/3', '/markets/new',
-      '/me', '/leaderboard', '/leaderboard?view=all', '/members', '/rules', `/invite/${token}`, '/nope',
+      '/me', '/raffle', '/leaderboard', '/leaderboard?view=all', '/members', '/rules', `/invite/${token}`, '/nope',
     ];
     const banned = /\p{Sc}|\b(owes?|owed|settle up|dollars?|usd|wallet|payments?|venmo|paypal)\b/iu;
     for (const p of paths) {

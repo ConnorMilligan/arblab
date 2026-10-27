@@ -41,6 +41,7 @@ export function page(ctx: PageCtx, title: string, body: Html): string {
     ? html`<nav>
     <a href="/">Markets</a>
     <a href="/markets/new">New market</a>
+    <a href="/raffle">Raffle</a>
     <a href="/me">My bets</a>
     <a href="/leaderboard">Leaderboard</a>
     <a href="/members">Members</a>

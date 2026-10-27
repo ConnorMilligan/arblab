@@ -43,7 +43,11 @@ test/*.test.ts         vitest
 - `disputes` (one per market: note, bond, voting_ends_at)
 - `jurors` (market_id, user_id, vote, voted_at)
 
-Ledger types: `allowance`, `stake`, `winnings`, `refund`, `bond`, `bond_return`, `jury_reward`.
+Ledger types: `allowance`, `stake`, `winnings`, `refund`, `bond`, `bond_return`, `jury_reward`, `raffle_stake`, `raffle_win`.
+
+Raffles: `raffle_entries` (round = the minute's start, user, amount) and `raffle_draws` (one row per drawn
+round). Each point is a ticket and one ticket takes the whole pot. `tick()` draws every finished round
+that has entries and no draw row, so a missed minute is drawn late rather than lost.
 
 ## Market state machine
 

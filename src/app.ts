@@ -21,6 +21,7 @@ import {
   betList,
 } from './domain/markets.ts';
 import { computePayouts } from './domain/payout.ts';
+import { currentEntries, enterRaffle, recentDraws, roundStart } from './domain/raffle.ts';
 import { balanceOf, ledgerFor, leaderboard, netForMarket } from './domain/points.ts';
 import {
   type Rng,
@@ -70,6 +71,7 @@ import {
   signupPage,
 } from './views/account.ts';
 import type { Flash, PageCtx } from './views/layout.ts';
+import { rafflePage } from './views/raffle.ts';
 import { type TodoItem, marketPage, marketsPage, newMarketPage } from './views/markets.ts';
 
 export interface AppOptions {
@@ -160,7 +162,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
     const now = clock();
     c.set('now', now);
     try {
-      tick(db, now);
+      tick(db, now, opts.rng);
     } catch (err) {
       console.error('tick failed', err);
     }
@@ -496,6 +498,21 @@ export function createApp(opts: AppOptions): Hono<Env> {
     act(c, `/markets/${marketId(c)}`, (form, user, now) => {
       castVote(db, marketId(c), user.id, parseOutcome(field(form, 'vote')), now);
       return 'Vote recorded.';
+    }),
+  );
+
+  // ---- raffle ----
+
+  app.get('/raffle', (c) => {
+    const now = c.get('now');
+    return c.html(rafflePage(ctx(c), roundStart(now), currentEntries(db, now), recentDraws(db, c.get('user')!.id)));
+  });
+
+  app.post('/raffle/enter', (c) =>
+    act(c, '/raffle', (form, user, now) => {
+      const amount = toInt(field(form, 'amount'));
+      enterRaffle(db, user.id, amount, now);
+      return `You put ${amount.toLocaleString('en-US')} into this minute's raffle.`;
     }),
   );
 
