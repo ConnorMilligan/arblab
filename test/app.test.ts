@@ -109,8 +109,9 @@ describe('access', () => {
 
   it('limits one client address across many names', async () => {
     member('Bob');
-    for (let i = 0; i < 20; i++) expect((await attempt(`ghost${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
-    expect((await attempt('ghost-new', 'nope', from('203.0.113.9'))).status).toBe(429);
+    for (let i = 0; i < 20; i++) member(`Member${i}`);
+    for (let i = 0; i < 20; i++) expect((await attempt(`Member${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
+    expect((await attempt('Member0', 'nope', from('203.0.113.9'))).status).toBe(429);
     expect((await attempt('Bob', PASSWORD, from('203.0.113.10'))).status).toBe(303);
   });
 
@@ -120,14 +121,24 @@ describe('access', () => {
     expect((await attempt('Bob', PASSWORD, from('192.0.2.1'))).status).toBe(429);
   });
 
-  it('ignores a client-supplied Cf-Connecting-Ip on requests that came through the host-side proxy', async () => {
+  it('ignores a client-supplied Cf-Connecting-Ip when the peer is the host side (reverse proxy)', async () => {
     member('Bob');
-    for (let i = 0; i < 5; i++) {
-      const spoofed = { 'cf-connecting-ip': `10.9.9.${i}`, 'tailscale-user-login': 'x@example.com', 'x-forwarded-for': '100.64.0.5' };
-      expect((await attempt('Bob', 'nope', spoofed)).status).toBe(401);
-    }
-    const next = { 'cf-connecting-ip': '10.9.9.99', 'tailscale-user-login': 'x@example.com', 'x-forwarded-for': '100.64.0.5' };
-    expect((await attempt('Bob', PASSWORD, next)).status).toBe(429);
+    const viaHost = createApp({ db, secret: 'test-secret-test-secret-test-secret', clock: () => now, bcryptCost: 4, peerAddress: () => '::ffff:127.0.0.1' });
+    const tryLogin = (password: string, cf: string) =>
+      viaHost.request(`http://${HOST}/login`, {
+        method: 'POST',
+        body: new URLSearchParams({ name: 'Bob', password }),
+        headers: { host: HOST, origin: `http://${HOST}`, 'content-type': 'application/x-www-form-urlencoded', 'cf-connecting-ip': cf, 'x-forwarded-for': '9.9.9.9, 100.64.0.5' },
+      });
+    for (let i = 0; i < 5; i++) expect((await tryLogin('nope', `10.9.9.${i}`)).status).toBe(401);
+    expect((await tryLogin(PASSWORD, '10.9.9.99')).status).toBe(429);
+  });
+
+  it('puts every made-up name in one bucket so they cannot grow the limiter', async () => {
+    member('Bob');
+    for (let i = 0; i < 5; i++) expect((await attempt(`ghost${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
+    expect((await attempt('another-ghost', 'nope', from('203.0.113.9'))).status).toBe(429);
+    expect((await attempt('Bob', PASSWORD, from('203.0.113.9'))).status).toBe(303);
   });
 
   it('revokes the session on the server at logout, so a copied cookie stops working', async () => {

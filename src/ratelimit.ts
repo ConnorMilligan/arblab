@@ -12,7 +12,8 @@ export const LOGIN_MAX_PER_NAME = 30;
  * - client address (20): stops one client sweeping many names.
  * - name (30): a backstop against guessing spread across many addresses.
  * There is deliberately no global cap, because that would let one client pause logins for all.
- * In memory: a restart clears it, which is fine for a single-instance app.
+ * Callers pass a canonical name (all non-members share one), so memory grows with members and
+ * addresses, not with attacker-chosen strings. In memory: a restart clears it, which is fine for a single-instance app.
  */
 export class LoginLimiter {
   private buckets = new Map<string, number[]>();
@@ -24,13 +25,18 @@ export class LoginLimiter {
   }
 
   fail(name: string, ip: string, now: number): void {
-    if (this.buckets.size > 5000) this.buckets.clear(); // bounded memory against made-up names
+    if (this.buckets.size > 1000) this.sweep(now);
     for (const [k] of this.keys(name, ip)) this.buckets.set(k, [...this.recent(k, now), now]);
   }
 
   /** A correct password clears this name's failures from this address only. */
   succeed(name: string, ip: string): void {
     this.buckets.delete(this.keys(name, ip)[0][0]);
+  }
+
+  /** Drops buckets whose failures have all aged out. Live counters are never evicted. */
+  private sweep(now: number): void {
+    for (const [k, times] of this.buckets) if (times.every((t) => t <= now - LOGIN_WINDOW)) this.buckets.delete(k);
   }
 
   private keys(name: string, ip: string): [string, number][] {

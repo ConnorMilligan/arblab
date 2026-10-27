@@ -1,3 +1,4 @@
+import { getConnInfo } from '@hono/node-server/conninfo';
 import bcrypt from 'bcryptjs';
 import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, getSignedCookie, setCookie, setSignedCookie } from 'hono/cookie';
@@ -5,6 +6,7 @@ import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { networkInterfaces } from 'node:os';
 import type { DB } from './db.ts';
 import {
   type MarketGroup,
@@ -67,10 +69,15 @@ export interface AppOptions {
   rng?: Rng;
   /** Public base URL used in invite links, e.g. https://arblab.fly.dev. Derived from the request if unset. */
   appUrl?: string;
+  /** The connected peer's address. Defaults to the socket's; tests inject it. */
+  peerAddress?: (c: Context<Env>) => string | undefined;
 }
 
 type Env = { Variables: { now: number; user: User | null } };
 type Form = Record<string, string | File | (string | File)[]>;
+
+const ownAddresses = () =>
+  new Set(Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((i) => i.address)));
 
 const SESSION_COOKIE = 'session';
 const SESSION_TTL = 30 * DAY;
@@ -89,6 +96,19 @@ export function createApp(opts: AppOptions): Hono<Env> {
   const clock = opts.clock ?? Date.now;
   const cost = opts.bcryptCost ?? 11;
   const secure = opts.secureCookies ?? false;
+  const peerOf =
+    opts.peerAddress ??
+    ((c: Context<Env>) => {
+      try {
+        return getConnInfo(c).remote.address;
+      } catch {
+        return undefined; // no socket (in-process requests)
+      }
+    });
+  const isHostPeer = (c: Context<Env>) => {
+    const peer = peerOf(c)?.replace(/^::ffff:/, '');
+    return !!peer && (peer === '::1' || peer.startsWith('127.') || ownAddresses().has(peer));
+  };
   const prefix = secure ? 'host' : undefined; // __Host- cookies can't be set by sibling subdomains
   const dummyHash = bcrypt.hashSync('not-the-password', cost);
   const assets = {
@@ -140,13 +160,15 @@ export function createApp(opts: AppOptions): Hono<Env> {
   // ---- helpers ----
 
   /**
-   * The address the limiter keys on. Requests that carry the host proxy's identity header use the
-   * last X-Forwarded-For entry, because that proxy passes a client-sent Cf-Connecting-Ip through.
-   * Everything else uses Cf-Connecting-Ip.
+   * The address the limiter keys on. Who is connected decides which header to believe:
+   * - A peer that is one of this container's own addresses (or loopback) is the reverse proxy on
+   *   the host side of the published port. It may pass a client-sent Cf-Connecting-Ip through, so
+   *   use the last X-Forwarded-For entry, which the proxy sets from the real peer.
+   * - Any other peer came over the container network, where the tunnel sets Cf-Connecting-Ip itself.
    */
   function clientIp(c: Context<Env>): string {
-    if (c.req.header('tailscale-user-login')) return c.req.header('x-forwarded-for')?.split(',').pop()?.trim() || 'tailnet';
-    return c.req.header('cf-connecting-ip') ?? 'local';
+    if (isHostPeer(c)) return c.req.header('x-forwarded-for')?.split(',').pop()?.trim() || 'local';
+    return c.req.header('cf-connecting-ip') ?? 'unknown';
   }
 
   function sameOrigin(c: Context<Env>): boolean {
@@ -241,7 +263,11 @@ export function createApp(opts: AppOptions): Hono<Env> {
   app.post('/login', async (c) => {
     const form = await c.req.parseBody();
     const name = field(form, 'name');
-    const wait = limiter.retryAfter(name, clientIp(c), c.get('now'));
+    const user = getUserByName(db, name);
+    // Names that don't exist share one bucket, so made-up names can't grow the limiter's memory.
+    const who = user?.display_name ?? '\0unknown';
+    const ip = clientIp(c);
+    const wait = limiter.retryAfter(who, ip, c.get('now'));
     if (wait > 0) {
       c.header('Retry-After', String(wait));
       return c.html(
@@ -249,14 +275,13 @@ export function createApp(opts: AppOptions): Hono<Env> {
         429,
       );
     }
-    const user = getUserByName(db, name);
     const ok = await bcrypt.compare(field(form, 'password'), user?.password_hash ?? dummyHash);
     if (!user || !ok) {
-      limiter.fail(name, clientIp(c), c.get('now'));
+      limiter.fail(who, ip, c.get('now'));
       return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
     }
     if (!user.is_active) return c.html(loginPage(ctx(c, { kind: 'error', message: 'This account has been deactivated.' }), name), 403);
-    limiter.succeed(name, clientIp(c));
+    limiter.succeed(who, ip);
     await startSession(c, user.id);
     return c.redirect('/', 303);
   });
