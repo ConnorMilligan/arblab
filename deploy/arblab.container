@@ -6,6 +6,7 @@ After=network-online.target
 [Container]
 ContainerName=arblab
 Image=localhost/arblab:latest
+Network=arblab.network
 PublishPort=127.0.0.1:8080:8080
 EnvironmentFile=%h/arblab/env
 Volume=%h/arblab/data:/data:Z

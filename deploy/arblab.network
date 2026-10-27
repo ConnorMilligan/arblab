@@ -1,0 +1,5 @@
+[Unit]
+Description=arblab private network
+
+[Network]
+NetworkName=arblab
