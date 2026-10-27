@@ -21,7 +21,7 @@ export function loginPage(ctx: PageCtx, name = ''): string {
   <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
   <button>Log in</button>
 </form>
-<p class="muted">${APP_NAME} is invite-only. Ask a member for an invite link.</p>`,
+<p class="muted">${APP_NAME} is invite-only. Ask a member for an invite link. Forgot your password? Ask the admin for a reset link.</p>`,
   );
 }
 
@@ -35,11 +35,38 @@ export function signupPage(ctx: PageCtx, token: string, inviter: string, name = 
 <form method="post" action="/invite/${token}" class="stack narrow">
   <label>Display name <small>2–24 characters. Others will see this.</small>
     <input name="name" required minlength="2" maxlength="24" value="${name}" autocomplete="username"></label>
-  <label>Password <small>At least 8 characters.</small>
-    <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+  <label>Password <small>At least 10 characters.</small>
+    <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
   <label class="check"><input type="checkbox" name="adult" value="yes" required> I confirm I am 18 or older.</label>
   <button>Join</button>
 </form>`,
+  );
+}
+
+export function resetPage(ctx: PageCtx, token: string, name: string): string {
+  return page(
+    ctx,
+    'Reset password',
+    html`<h1>Reset password</h1>
+<p>Choose a new password for <b>${name}</b>. You will be logged out everywhere and asked to log in again.</p>
+<form method="post" action="/reset/${token}" class="stack narrow">
+  <label>New password <small>At least 10 characters.</small>
+    <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+  <label>Repeat it <input type="password" name="again" required minlength="10" autocomplete="new-password"></label>
+  <button>Set password</button>
+</form>`,
+  );
+}
+
+export function resetLinkPage(ctx: PageCtx, name: string, link: string, expiresAt: number): string {
+  return page(
+    ctx,
+    'Reset link',
+    html`<h1>Reset link for ${name}</h1>
+<p>Send this to ${name} privately (not in a group chat). It works once and expires ${when(expiresAt)}.
+   It is shown only now. Making another link for ${name} cancels this one.</p>
+<ul class="invites"><li><input readonly value="${link}" aria-label="Reset link"></li></ul>
+<p><a href="/members">Back to members</a></p>`,
   );
 }
 
@@ -75,7 +102,7 @@ ${ledger.map(
 <h2>Change password</h2>
 <form method="post" action="/me/password" class="stack narrow">
   <label>Current password <input type="password" name="current" required autocomplete="current-password"></label>
-  <label>New password <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+  <label>New password <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
   <button>Change password</button>
 </form>`,
   );
@@ -115,7 +142,8 @@ ${members.map(
       ? html`<td>${m.id === ctx.viewer!.id
           ? ''
           : html`<form method="post" action="/members/${m.id}/${m.is_active ? 'deactivate' : 'reactivate'}">
-              <button class="link">${m.is_active ? 'Deactivate' : 'Reactivate'}</button></form>`}</td>`
+              <button class="link">${m.is_active ? 'Deactivate' : 'Reactivate'}</button></form>
+              ${m.is_active ? html`<form method="post" action="/members/${m.id}/reset"><button class="link">Reset link</button></form>` : ''}`}</td>`
       : ''}</tr>`,
 )}</tbody></table></div>
 
@@ -148,7 +176,7 @@ export function rulesPage(ctx: PageCtx): string {
 <h2>Membership</h2>
 <ul>
   <li>Invite-only, 18+ only, at most ${MAX_MEMBERS} active members.</li>
-  <li>Any member can create a single-use invite link. The admin can deactivate members, and has no other special powers.</li>
+  <li>Any member can create a single-use invite link. The admin can deactivate members and create password reset links for them (a reset link lets whoever uses it set that member's password), and has no other special powers.</li>
 </ul>
 
 <h2>Points</h2>

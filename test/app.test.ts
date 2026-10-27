@@ -150,6 +150,46 @@ describe('access', () => {
     expect((await attempt(long + 'z', 'nope', ip)).status).toBe(429);
   });
 
+  it('lets the admin issue a reset link that sets a new password once', async () => {
+    member('Admin', true);
+    const bobId = member('Bob');
+    const admin = client();
+    await admin.login('Admin');
+
+    const bob = client();
+    await bob.login('Bob');
+    expect((await bob.post(`/members/${bobId}/reset`, {})).status).toBe(303); // not an admin: refused
+    expect((await bob.get('/me')).status).toBe(200);
+
+    const page = await admin.post(`/members/${bobId}/reset`, {});
+    expect(page.headers.get('cache-control')).toBe('no-store');
+    const path = (await page.text()).match(/value="https?:\/\/[^/"]+(\/reset\/[\w-]+)"/)![1];
+
+    const stranger = client();
+    expect(await stranger.text(path)).toContain('Bob');
+    expect((await stranger.post(path, { password: 'short', again: 'short' })).status).toBe(400);
+    expect((await stranger.post(path, { password: 'a brand new password', again: 'different one!!' })).status).toBe(400);
+    const done = await stranger.post(path, { password: 'a brand new password', again: 'a brand new password' });
+    expect(done.status).toBe(303);
+    expect(done.headers.get('location')).toBe('/login');
+
+    expect((await bob.get('/me')).status).toBe(303); // old session ended
+    expect((await stranger.get(path)).status).toBe(404); // spent
+    expect((await stranger.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(401);
+    expect((await stranger.post('/login', { name: 'Bob', password: 'a brand new password' })).status).toBe(303);
+  });
+
+  it('rejects unknown and expired reset links', async () => {
+    member('Admin', true);
+    const bobId = member('Bob');
+    expect((await client().get('/reset/nonsense')).status).toBe(404);
+    const admin = client();
+    await admin.login('Admin');
+    const path = (await (await admin.post(`/members/${bobId}/reset`, {})).text()).match(/(\/reset\/[\w-]+)"/)![1];
+    now += 61 * 60_000;
+    expect((await client().get(path)).status).toBe(404);
+  });
+
   it('revokes the session on the server at logout, so a copied cookie stops working', async () => {
     member('Bob');
     const cookie = (await attempt('Bob', PASSWORD)).headers.getSetCookie()[0].split(';')[0];

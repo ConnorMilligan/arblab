@@ -4,6 +4,7 @@ export const MAX_MEMBERS = 50;
 export const WEEKLY_ALLOWANCE = 1000;
 export const ALLOWANCE_CAP = 5000;
 export const INVITE_TTL = 7 * DAY;
+export const RESET_TTL = HOUR;
 
 export const MIN_BOND = 50;
 export const CHALLENGE_WINDOW = 24 * HOUR;

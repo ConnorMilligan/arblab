@@ -36,26 +36,39 @@ import {
   jurySize,
   propose,
 } from './domain/resolution.ts';
-import { DISPUTES_PER_WEEK, RuleError, parseOutcome, parseSide } from './domain/rules.ts';
+import { DISPUTES_PER_WEEK, RuleError, parseOutcome, parseSide, rule } from './domain/rules.ts';
 import { tick } from './domain/tick.ts';
 import {
   type User,
   createInvite,
+  createPasswordReset,
   getUser,
   getUserByName,
   listMembers,
   openInvites,
   redeemInvite,
+  redeemPasswordReset,
   revokeInvite,
   setActive,
   setPasswordHash,
   usableInvite,
+  usableReset,
   validateDisplayName,
   validatePassword,
 } from './domain/users.ts';
 import { LoginLimiter } from './ratelimit.ts';
 import { DAY, seasonOf } from './time.ts';
-import { leaderboardPage, loginPage, mePage, membersPage, messagePage, rulesPage, signupPage } from './views/account.ts';
+import {
+  leaderboardPage,
+  loginPage,
+  mePage,
+  membersPage,
+  messagePage,
+  resetLinkPage,
+  resetPage,
+  rulesPage,
+  signupPage,
+} from './views/account.ts';
 import type { Flash, PageCtx } from './views/layout.ts';
 import { type TodoItem, marketPage, marketsPage, newMarketPage } from './views/markets.ts';
 
@@ -81,7 +94,7 @@ const ownAddresses = () =>
 
 const SESSION_COOKIE = 'session';
 const SESSION_TTL = 30 * DAY;
-const PUBLIC_PATHS = [/^\/login$/, /^\/invite\/[\w-]+$/, /^\/rules$/];
+const PUBLIC_PATHS = [/^\/login$/, /^\/invite\/[\w-]+$/, /^\/reset\/[\w-]+$/, /^\/rules$/];
 
 const field = (form: Form, key: string): string => {
   const v = Array.isArray(form[key]) ? form[key][0] : form[key];
@@ -290,6 +303,41 @@ export function createApp(opts: AppOptions): Hono<Env> {
     if (s) db.prepare('DELETE FROM sessions WHERE id = ?').run(s.sid);
     deleteCookie(c, SESSION_COOKIE, { path: '/', secure, prefix });
     return c.redirect('/login', 303);
+  });
+
+  app.get('/reset/:token', (c) => {
+    c.header('Cache-Control', 'no-store');
+    try {
+      const { user } = usableReset(db, c.req.param('token'), c.get('now'));
+      return c.html(resetPage(ctx(c), c.req.param('token'), user.display_name));
+    } catch (err) {
+      if (!(err instanceof RuleError)) throw err;
+      return c.html(messagePage(ctx(c), 'Reset password', err.message), 404);
+    }
+  });
+
+  app.post('/reset/:token', async (c) => {
+    c.header('Cache-Control', 'no-store');
+    const token = c.req.param('token');
+    const form = await c.req.parseBody();
+    try {
+      const { user } = usableReset(db, token, c.get('now')); // fail fast before the slow hash
+      const password = field(form, 'password');
+      validatePassword(password);
+      rule(password === field(form, 'again'), 'The two passwords do not match.');
+      redeemPasswordReset(db, token, await bcrypt.hash(password, cost), clock());
+      limiter.succeed(user.display_name, clientIp(c));
+      flash(c, 'ok', 'Password changed. Log in with your new password.');
+      return c.redirect('/login', 303);
+    } catch (err) {
+      if (!(err instanceof RuleError)) throw err;
+      try {
+        const { user } = usableReset(db, token, c.get('now'));
+        return c.html(resetPage(ctx(c, { kind: 'error', message: err.message }), token, user.display_name), 400);
+      } catch {
+        return c.html(messagePage(ctx(c), 'Reset password', err.message), 404);
+      }
+    }
   });
 
   app.get('/invite/:token', (c) => {
@@ -506,6 +554,19 @@ export function createApp(opts: AppOptions): Hono<Env> {
       }),
     );
   }
+
+  app.post('/members/:id/reset', (c) => {
+    try {
+      const target = getUser(db, toInt(c.req.param('id') ?? ''));
+      const { token, expiresAt } = createPasswordReset(db, c.get('user')!.id, target?.id ?? -1, c.get('now'));
+      c.header('Cache-Control', 'no-store');
+      return c.html(resetLinkPage(ctx(c), target!.display_name, `${baseUrl(c)}/reset/${token}`, expiresAt));
+    } catch (err) {
+      if (!(err instanceof RuleError)) throw err;
+      flash(c, 'error', err.message);
+      return c.redirect('/members', 303);
+    }
+  });
 
   app.get('/rules', (c) => c.html(rulesPage(ctx(c))));
 

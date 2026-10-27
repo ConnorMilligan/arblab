@@ -1,7 +1,7 @@
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import type { DB } from '../db.ts';
 import { grantWeeklyAllowance } from './points.ts';
-import { INVITE_TTL, MAX_MEMBERS, RuleError, cleanText, rule } from './rules.ts';
+import { INVITE_TTL, MAX_MEMBERS, RESET_TTL, RuleError, cleanText, rule } from './rules.ts';
 
 export interface User {
   id: number;
@@ -157,4 +157,50 @@ export function listMembers(db: DB): MemberRow[] {
        ORDER BY u.is_active DESC, u.display_name`,
     )
     .all() as MemberRow[];
+}
+
+const hashToken = (token: string) => createHash('sha256').update(token).digest('hex');
+
+/**
+ * Admin-only. Returns a one-hour, single-use token for the member to set a new password.
+ * It is shown once and only its hash is stored. Any earlier unused link for that member stops working.
+ */
+export function createPasswordReset(db: DB, actorId: number, targetId: number, now: number): { token: string; expiresAt: number } {
+  rule(getUser(db, actorId)?.is_admin, 'Only the admin can do that.');
+  rule(getUser(db, targetId)?.is_active, 'No such active member.');
+  const token = randomBytes(24).toString('base64url');
+  db.transaction(() => {
+    db.prepare('UPDATE password_resets SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now, targetId);
+    db.prepare('INSERT INTO password_resets (user_id, token_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)').run(
+      targetId,
+      hashToken(token),
+      actorId,
+      now,
+      now + RESET_TTL,
+    );
+  })();
+  return { token, expiresAt: now + RESET_TTL };
+}
+
+/** Returns the member the link is for, or throws a RuleError explaining why it can't be used. */
+export function usableReset(db: DB, token: string, now: number): { id: number; user: User } {
+  const row = db.prepare('SELECT * FROM password_resets WHERE token_hash = ?').get(hashToken(token)) as
+    | { id: number; user_id: number; expires_at: number; used_at: number | null }
+    | undefined;
+  rule(row && row.used_at === null && row.expires_at > now, 'This reset link is not valid. Ask the admin for a new one.');
+  const user = getUser(db, row.user_id);
+  rule(user?.is_active, 'This reset link is not valid. Ask the admin for a new one.');
+  return { id: row.id, user };
+}
+
+/** Sets the new password, ends every session for the member, and spends the link, atomically. */
+export function redeemPasswordReset(db: DB, token: string, passwordHash: string, now: number): User {
+  return db.transaction(() => {
+    const { id, user } = usableReset(db, token, now);
+    const spent = db.prepare('UPDATE password_resets SET used_at = ? WHERE id = ? AND used_at IS NULL').run(now, id);
+    if (spent.changes !== 1) throw new RuleError('This reset link is not valid. Ask the admin for a new one.');
+    setPasswordHash(db, user.id, passwordHash);
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+    return user;
+  })();
 }

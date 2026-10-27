@@ -36,7 +36,7 @@ Everyone else joins through single-use invite links from the Members page.
 | `npm test` | Run the vitest suite |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run cli -- create-admin <name> --adult` | Create the first member (admin). Only works on an empty database. |
-| `npm run cli -- reset-password <name>` | Print a new password for a member. There's no email, so this is how a forgotten password is handled. |
+| `npm run cli -- reset-password <name>` | Print a new password for a member. For the admin's own forgotten password, or when the web portal isn't an option. |
 | `npm run cli -- seed-demo` | Fill an empty database with demo data |
 | `npm run cli -- backup <file>` | Write a consistent copy of the database |
 
@@ -145,7 +145,10 @@ The spec left a few things open. These are the choices made (more detail in PLAN
 ## Simplified or left out
 
 - No email: no notifications (a "Needs you" box on the home page lists opt-ins and jury duty), and
-  no self-service password reset. The admin runs `reset-password`.
+  no self-service password reset. A member who forgot their password asks the admin, who clicks
+  "Reset link" next to their name on the Members page and sends them the link privately. The link works
+  once, expires after an hour, is stored only as a hash, replaces any earlier link, and ends the
+  member's sessions when used. The admin's own password is reset with the `reset-password` CLI command.
 - Login rate limiting counts failures in memory over 15 minutes: 5 per name from one client address, 20 per address, and 30 per name overall. The address comes from `X-Forwarded-For` when the request comes from the host-side proxy, and from `Cf-Connecting-Ip` otherwise. There is no global cap, so one client cannot pause logins for everyone. A restart clears the counts.
 - Sessions are server-side rows: logging out, changing a password or deactivating a member revokes them.
 - Markets and bets can't be edited, cancelled or deleted once created. No comments or discussion.
