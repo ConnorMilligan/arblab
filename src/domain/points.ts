@@ -45,13 +45,21 @@ export function debit(db: DB, userId: number, type: 'stake' | 'bond' | 'raffle_s
   append(db, userId, type, -amount, marketId, now);
 }
 
+/** Points staked in raffle rounds that haven't been drawn yet. They still count towards the allowance cap. */
+function openRaffleStakes(db: DB, userId: number): number {
+  const row = db
+    .prepare('SELECT COALESCE(SUM(amount), 0) AS s FROM raffle_entries WHERE user_id = ? AND round NOT IN (SELECT round FROM raffle_draws)')
+    .get(userId) as { s: number };
+  return row.s;
+}
+
 /**
  * Grants this week's allowance to one member if they haven't had it yet:
  * 1,000 points, but never lifting the balance above 5,000.
  */
 export function grantWeeklyAllowance(db: DB, userId: number, now: number): number {
   const week = weekStart(now);
-  const amount = Math.max(0, Math.min(WEEKLY_ALLOWANCE, ALLOWANCE_CAP - balanceOf(db, userId)));
+  const amount = Math.max(0, Math.min(WEEKLY_ALLOWANCE, ALLOWANCE_CAP - balanceOf(db, userId) - openRaffleStakes(db, userId)));
   const res = db
     .prepare('INSERT OR IGNORE INTO allowances (user_id, week_start, amount, created_at) VALUES (?, ?, ?, ?)')
     .run(userId, week, amount, now);

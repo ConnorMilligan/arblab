@@ -3,10 +3,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.ts';
-import { credit } from '../src/domain/points.ts';
+import { credit, grantWeeklyAllowance } from '../src/domain/points.ts';
 import { ROUND, currentEntries, drawRaffles, enterRaffle, recentDraws, roundStart } from '../src/domain/raffle.ts';
 import { RuleError } from '../src/domain/rules.ts';
 import { tick } from '../src/domain/tick.ts';
+import { DAY } from '../src/time.ts';
 import { T0, addUser, setup } from './helpers.ts';
 
 describe('raffle', () => {
@@ -54,6 +55,27 @@ describe('raffle', () => {
     enterRaffle(db, ids[0], 400, T0);
     drawRaffles(db, T0 + ROUND, () => 399);
     expect(bal(ids[0])).toBe(1000);
+  });
+});
+
+describe('allowance cap', () => {
+  const nextMonday = T0 + 7 * DAY;
+
+  it('draws the round that ends at midnight before granting, so the staked points count', () => {
+    const { db, ids, bal } = setup(1);
+    credit(db, ids[0], 'raffle_win', 4000, null, T0); // 5,000 in total
+    enterRaffle(db, ids[0], 5000, nextMonday - 5_000);
+    expect(bal(ids[0])).toBe(0);
+    tick(db, nextMonday, () => 0);
+    expect(bal(ids[0])).toBe(5000);
+  });
+
+  it('counts points in a round that is still open', () => {
+    const { db, ids, bal } = setup(1);
+    credit(db, ids[0], 'raffle_win', 4000, null, T0);
+    enterRaffle(db, ids[0], 5000, nextMonday + 1_000);
+    expect(grantWeeklyAllowance(db, ids[0], nextMonday + 2_000)).toBe(0);
+    expect(bal(ids[0])).toBe(0);
   });
 });
 

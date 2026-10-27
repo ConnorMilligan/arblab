@@ -12,8 +12,8 @@ import { PROPOSAL_DEADLINE } from './rules.ts';
  */
 export function tick(db: DB, now: number, rng: Rng = randomInt): void {
   db.transaction(() => {
+    drawRaffles(db, now, rng); // before the allowance, so stakes from finished rounds are back in balances
     grantAllowances(db, now);
-    drawRaffles(db, now, rng);
 
     const ids = (sql: string, ...params: number[]) => (db.prepare(sql).all(...params) as { id: number }[]).map((r) => r.id);
 
