@@ -85,33 +85,59 @@ describe('access', () => {
     expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(403);
   });
 
-  it('locks a name out after 5 failed logins, even for the right password, until the window passes', async () => {
+  const attempt = (name: string, password: string, headers: Record<string, string> = {}) =>
+    app.request(`http://${HOST}/login`, {
+      method: 'POST',
+      body: new URLSearchParams({ name, password }),
+      headers: { host: HOST, origin: `http://${HOST}`, 'content-type': 'application/x-www-form-urlencoded', ...headers },
+    });
+  const from = (ip: string) => ({ 'cf-connecting-ip': ip });
+
+  it('locks a name out for the address that failed 5 times, until the window passes', async () => {
     member('Bob');
     member('Cara');
-    const c = client();
-    for (let i = 0; i < 5; i++) expect((await c.post('/login', { name: 'Bob', password: 'nope' })).status).toBe(401);
-    const locked = await c.post('/login', { name: 'bob', password: PASSWORD });
+    const attacker = from('203.0.113.9');
+    for (let i = 0; i < 5; i++) expect((await attempt('Bob', 'nope', attacker)).status).toBe(401);
+    const locked = await attempt('bob', PASSWORD, attacker);
     expect(locked.status).toBe(429);
     expect(Number(locked.headers.get('retry-after'))).toBeGreaterThan(0);
-    expect((await c.post('/login', { name: 'Cara', password: PASSWORD })).status).toBe(303);
+    expect((await attempt('Cara', PASSWORD, attacker)).status).toBe(303); // other names are unaffected
+    expect((await attempt('Bob', PASSWORD, from('198.51.100.7'))).status).toBe(303); // so is Bob, elsewhere
     now += 15 * 60_000 + 1;
-    expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(303);
+    expect((await attempt('Bob', PASSWORD, attacker)).status).toBe(303);
   });
 
   it('limits one client address across many names', async () => {
     member('Bob');
-    const c = client();
-    const from = (ip: string) => ({ 'cf-connecting-ip': ip });
-    const attempt = (name: string, ip: string) =>
-      app.request(`http://${HOST}/login`, {
-        method: 'POST',
-        body: new URLSearchParams({ name, password: 'nope' }),
-        headers: { host: HOST, origin: `http://${HOST}`, 'content-type': 'application/x-www-form-urlencoded', ...from(ip) },
-      });
-    for (let i = 0; i < 20; i++) expect((await attempt(`ghost${i}`, '203.0.113.9')).status).toBe(401);
-    expect((await attempt('ghost-new', '203.0.113.9')).status).toBe(429);
-    expect((await attempt('ghost-new', '203.0.113.10')).status).toBe(401);
-    expect((await c.post('/login', { name: 'Bob', password: PASSWORD })).status).toBe(303);
+    for (let i = 0; i < 20; i++) expect((await attempt(`ghost${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
+    expect((await attempt('ghost-new', 'nope', from('203.0.113.9'))).status).toBe(429);
+    expect((await attempt('Bob', PASSWORD, from('203.0.113.10'))).status).toBe(303);
+  });
+
+  it('backstops guessing at one name spread over many addresses', async () => {
+    member('Bob');
+    for (let i = 0; i < 30; i++) expect((await attempt('Bob', 'nope', from(`198.51.100.${i}`))).status).toBe(401);
+    expect((await attempt('Bob', PASSWORD, from('192.0.2.1'))).status).toBe(429);
+  });
+
+  it('ignores a client-supplied Cf-Connecting-Ip on requests that came through the host-side proxy', async () => {
+    member('Bob');
+    for (let i = 0; i < 5; i++) {
+      const spoofed = { 'cf-connecting-ip': `10.9.9.${i}`, 'tailscale-user-login': 'x@example.com', 'x-forwarded-for': '100.64.0.5' };
+      expect((await attempt('Bob', 'nope', spoofed)).status).toBe(401);
+    }
+    const next = { 'cf-connecting-ip': '10.9.9.99', 'tailscale-user-login': 'x@example.com', 'x-forwarded-for': '100.64.0.5' };
+    expect((await attempt('Bob', PASSWORD, next)).status).toBe(429);
+  });
+
+  it('revokes the session on the server at logout, so a copied cookie stops working', async () => {
+    member('Bob');
+    const cookie = (await attempt('Bob', PASSWORD)).headers.getSetCookie()[0].split(';')[0];
+    const as = (path: string, init: RequestInit = {}) =>
+      app.request(`http://${HOST}${path}`, { ...init, headers: { host: HOST, origin: `http://${HOST}`, cookie } });
+    expect((await as('/')).status).toBe(200);
+    expect((await as('/logout', { method: 'POST' })).status).toBe(303);
+    expect((await as('/')).status).toBe(303);
   });
 
   it('rejects oversized request bodies', async () => {

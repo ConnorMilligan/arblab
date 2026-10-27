@@ -3,6 +3,7 @@ import { type Context, Hono } from 'hono';
 import { deleteCookie, getCookie, getSignedCookie, setCookie, setSignedCookie } from 'hono/cookie';
 import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import type { DB } from './db.ts';
 import {
@@ -138,7 +139,15 @@ export function createApp(opts: AppOptions): Hono<Env> {
 
   // ---- helpers ----
 
-  const clientIp = (c: Context<Env>) => c.req.header('cf-connecting-ip');
+  /**
+   * The address the limiter keys on. Requests that carry the host proxy's identity header use the
+   * last X-Forwarded-For entry, because that proxy passes a client-sent Cf-Connecting-Ip through.
+   * Everything else uses Cf-Connecting-Ip.
+   */
+  function clientIp(c: Context<Env>): string {
+    if (c.req.header('tailscale-user-login')) return c.req.header('x-forwarded-for')?.split(',').pop()?.trim() || 'tailnet';
+    return c.req.header('cf-connecting-ip') ?? 'local';
+  }
 
   function sameOrigin(c: Context<Env>): boolean {
     const origin = c.req.header('origin');
@@ -150,18 +159,28 @@ export function createApp(opts: AppOptions): Hono<Env> {
     }
   }
 
-  async function sessionUser(c: Context<Env>, now: number): Promise<User | null> {
+  async function readSession(c: Context<Env>): Promise<{ id: number; version: number; issuedAt: number; sid: string } | null> {
     const raw = await getSignedCookie(c, secret, SESSION_COOKIE, prefix);
     if (!raw) return null;
-    const [id, version, issuedAt] = raw.split(':').map(Number);
-    if (!(issuedAt + SESSION_TTL > now)) return null;
-    const user = getUser(db, id);
-    return user && user.is_active && user.session_version === version ? user : null;
+    const [id, version, issuedAt, sid] = raw.split(':');
+    return sid ? { id: Number(id), version: Number(version), issuedAt: Number(issuedAt), sid } : null;
+  }
+
+  async function sessionUser(c: Context<Env>, now: number): Promise<User | null> {
+    const s = await readSession(c);
+    if (!s || !(s.issuedAt + SESSION_TTL > now)) return null;
+    const live = db.prepare('SELECT 1 FROM sessions WHERE id = ? AND user_id = ?').get(s.sid, s.id);
+    const user = getUser(db, s.id);
+    return live && user && user.is_active && user.session_version === s.version ? user : null;
   }
 
   async function startSession(c: Context<Env>, userId: number): Promise<void> {
     const u = getUser(db, userId)!;
-    await setSignedCookie(c, SESSION_COOKIE, `${u.id}:${u.session_version}:${c.get('now')}`, secret, {
+    const now = c.get('now');
+    const sid = randomBytes(24).toString('base64url');
+    db.prepare('DELETE FROM sessions WHERE created_at <= ?').run(now - SESSION_TTL);
+    db.prepare('INSERT INTO sessions (id, user_id, created_at) VALUES (?, ?, ?)').run(sid, u.id, now);
+    await setSignedCookie(c, SESSION_COOKIE, `${u.id}:${u.session_version}:${now}:${sid}`, secret, {
       httpOnly: true,
       secure,
       sameSite: 'Lax',
@@ -237,12 +256,14 @@ export function createApp(opts: AppOptions): Hono<Env> {
       return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
     }
     if (!user.is_active) return c.html(loginPage(ctx(c, { kind: 'error', message: 'This account has been deactivated.' }), name), 403);
-    limiter.succeed(name);
+    limiter.succeed(name, clientIp(c));
     await startSession(c, user.id);
     return c.redirect('/', 303);
   });
 
-  app.post('/logout', (c) => {
+  app.post('/logout', async (c) => {
+    const s = await readSession(c);
+    if (s) db.prepare('DELETE FROM sessions WHERE id = ?').run(s.sid);
     deleteCookie(c, SESSION_COOKIE, { path: '/', secure, prefix });
     return c.redirect('/login', 303);
   });

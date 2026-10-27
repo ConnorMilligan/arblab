@@ -18,6 +18,13 @@ CREATE TABLE IF NOT EXISTS users (
   created_at INTEGER NOT NULL
 );
 
+-- One row per login. The cookie names a row, so logging out revokes it server-side.
+CREATE TABLE IF NOT EXISTS sessions (
+  id TEXT PRIMARY KEY,
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS invites (
   id INTEGER PRIMARY KEY,
   token TEXT NOT NULL UNIQUE,
