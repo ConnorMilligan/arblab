@@ -1,11 +1,11 @@
 import type { DB } from '../db.ts';
-import { MINUTE } from '../time.ts';
 import { requireActive } from './markets.ts';
 import { credit, debit } from './points.ts';
 import type { Rng } from './resolution.ts';
 
-/** Rounds are the wall-clock minutes; a round's raffle is drawn when its minute ends. */
-export const roundStart = (t: number): number => Math.floor(t / MINUTE) * MINUTE;
+/** Rounds are consecutive 10-second windows; a round's raffle is drawn when its window ends. */
+export const ROUND = 10_000;
+export const roundStart = (t: number): number => Math.floor(t / ROUND) * ROUND;
 
 /** Puts points into the current round. Entering again in the same round adds to the entry. */
 export function enterRaffle(db: DB, userId: number, amount: number, now: number): number {
@@ -29,7 +29,7 @@ export function drawRaffles(db: DB, now: number, rng: Rng): void {
       `SELECT DISTINCT round FROM raffle_entries
        WHERE round + ? <= ? AND round NOT IN (SELECT round FROM raffle_draws) ORDER BY round`,
     )
-    .all(MINUTE, now) as { round: number }[];
+    .all(ROUND, now) as { round: number }[];
   for (const { round } of rounds) {
     const entries = db
       .prepare('SELECT user_id, amount FROM raffle_entries WHERE round = ? ORDER BY user_id')

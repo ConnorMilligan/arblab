@@ -15,7 +15,7 @@ A small invite-only prediction market for up to 50 friends. Play points only.
 ## Files
 
 ```
-src/server.ts          entry: open DB, start HTTP server, 60s tick
+src/server.ts          entry: open DB, start HTTP server, 5s tick
 src/app.ts             routes + session/CSRF middleware
 src/db.ts              schema (CREATE TABLE IF NOT EXISTS) + open helper
 src/html.ts            ~20-line escaping `html` tagged template
@@ -45,9 +45,9 @@ test/*.test.ts         vitest
 
 Ledger types: `allowance`, `stake`, `winnings`, `refund`, `bond`, `bond_return`, `jury_reward`, `raffle_stake`, `raffle_win`.
 
-Raffles: `raffle_entries` (round = the minute's start, user, amount) and `raffle_draws` (one row per drawn
+Raffles: `raffle_entries` (round = the start of a 10-second window, user, amount) and `raffle_draws` (one row per drawn
 round). Each point is a ticket and one ticket takes the whole pot. `tick()` draws every finished round
-that has entries and no draw row, so a missed minute is drawn late rather than lost.
+that has entries and no draw row, so a missed round is drawn late rather than lost.
 
 ## Market state machine
 
@@ -59,7 +59,7 @@ pending ──subject opts in──▶ open ──close_at──▶ closed ─�
 ```
 
 `tick(db, now)` makes every time-based transition (allowance, close, auto-void, auto-resolve,
-jury close). It runs at the start of every request and on a 60-second `setInterval`. Every
+jury close). It runs at the start of every request and on a 5-second `setInterval` (raffles are drawn on it). Every
 transition is guarded by `WHERE status = ?`, so running it twice changes nothing.
 
 ## Points

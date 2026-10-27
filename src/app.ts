@@ -512,7 +512,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
     act(c, '/raffle', (form, user, now) => {
       const amount = toInt(field(form, 'amount'));
       enterRaffle(db, user.id, amount, now);
-      return `You put ${amount.toLocaleString('en-US')} into this minute's raffle.`;
+      return `You put ${amount.toLocaleString('en-US')} into this round's raffle.`;
     }),
   );
 

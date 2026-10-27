@@ -68,7 +68,7 @@ fly deploy
 fly ssh console -C "node src/cli.ts create-admin YourName --adult"
 ```
 
-`fly.toml` keeps one machine running so the once-a-minute deadline check keeps ticking. Deadlines
+`fly.toml` keeps one machine running so the deadline check keeps ticking. Deadlines
 are also applied on every request, so nothing is missed if the machine sleeps.
 
 ### Railway
@@ -86,7 +86,7 @@ server and copy the file off (for example with `fly ssh sftp get`).
 ## How it works
 
 ```
-src/server.ts        entry point: opens the DB, serves HTTP, runs the deadline check every 60 s
+src/server.ts        entry point: opens the DB, serves HTTP, runs the deadline check every 5 s
 src/app.ts           routes, signed-cookie sessions, same-origin check for form posts
 src/db.ts            schema; the ledger is append-only (UPDATE/DELETE triggers abort)
 src/domain/          every rule, as plain functions taking (db, ..., now)
@@ -94,7 +94,7 @@ src/domain/          every rule, as plain functions taking (db, ..., now)
   users.ts           invites, 50-member cap, deactivation
   markets.ts         creation + checklist, subject opt-in, bets, final payout
   payout.ts          pure parimutuel math (rounding and leftover points)
-  raffle.ts          per-minute stake-weighted raffles: entries and draws
+  raffle.ts          stake-weighted raffles every 10 seconds: entries and draws
   resolution.ts      proposals, disputes, jury draw, voting, bond forfeiture
   tick.ts            applies every deadline that has passed; safe to run repeatedly
 src/views/           HTML templates (tagged template literals with auto-escaping)
@@ -106,7 +106,7 @@ test/                vitest: domain rules plus HTTP tests against the real app
 - **Every rule is enforced on the server** in `src/domain/`. The UI hides forms you can't use,
   but the tests post directly to show the server refuses them anyway.
 - **Deadlines** (close, the 24-hour challenge window, 7-day and 72-hour auto-void, Monday allowance)
-  are applied by `tick()` before each request and once a minute. Each step only touches rows still in
+  are applied by `tick()` before each request and every 5 seconds. Each step only touches rows still in
   the earlier state, so running it twice changes nothing.
 
 ## Dependencies

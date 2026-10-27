@@ -4,19 +4,18 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.ts';
 import { credit } from '../src/domain/points.ts';
-import { currentEntries, drawRaffles, enterRaffle, recentDraws, roundStart } from '../src/domain/raffle.ts';
+import { ROUND, currentEntries, drawRaffles, enterRaffle, recentDraws, roundStart } from '../src/domain/raffle.ts';
 import { RuleError } from '../src/domain/rules.ts';
 import { tick } from '../src/domain/tick.ts';
-import { MINUTE } from '../src/time.ts';
 import { T0, addUser, setup } from './helpers.ts';
 
 describe('raffle', () => {
   it('takes the stake at once and lets a member add to their entry', () => {
     const { db, ids, bal } = setup(2);
-    enterRaffle(db, ids[0], 300, T0 + 5_000);
-    enterRaffle(db, ids[0], 200, T0 + 30_000);
+    enterRaffle(db, ids[0], 300, T0 + 1_000);
+    enterRaffle(db, ids[0], 200, T0 + 3_000);
     expect(bal(ids[0])).toBe(500);
-    expect(currentEntries(db, T0 + 40_000)).toMatchObject([{ user_id: ids[0], amount: 500 }]);
+    expect(currentEntries(db, T0 + 4_000)).toMatchObject([{ user_id: ids[0], amount: 500 }]);
   });
 
   it('refuses entries above the balance or that are not whole positive numbers', () => {
@@ -26,11 +25,11 @@ describe('raffle', () => {
     expect(() => enterRaffle(db, ids[0], 1.5, T0)).toThrow(RuleError);
   });
 
-  it('draws nothing until the minute is over, then pays the whole pot to the ticket holder', () => {
+  it('draws nothing until the round is over, then pays the whole pot to the ticket holder', () => {
     const { db, ids, bal } = setup(3);
     enterRaffle(db, ids[0], 300, T0); // tickets 0-299
     enterRaffle(db, ids[1], 200, T0 + 1); // 300-499
-    const end = roundStart(T0) + MINUTE;
+    const end = roundStart(T0) + ROUND;
     tick(db, end - 1, () => 300);
     expect(recentDraws(db, ids[0])).toEqual([]);
     tick(db, end, () => 300);
@@ -43,9 +42,9 @@ describe('raffle', () => {
   it('draws each round once and catches up on rounds missed while the server slept', () => {
     const { db, ids, bal } = setup(2);
     enterRaffle(db, ids[0], 100, T0);
-    enterRaffle(db, ids[1], 100, T0 + MINUTE);
-    tick(db, T0 + 10 * MINUTE, () => 0);
-    tick(db, T0 + 11 * MINUTE, () => 0);
+    enterRaffle(db, ids[1], 100, T0 + ROUND);
+    tick(db, T0 + 10 * ROUND, () => 0);
+    tick(db, T0 + 11 * ROUND, () => 0);
     expect(recentDraws(db, ids[0])).toHaveLength(2);
     expect(bal(ids[0]) + bal(ids[1])).toBe(2000);
   });
@@ -53,7 +52,7 @@ describe('raffle', () => {
   it('gives a lone entrant their points back', () => {
     const { db, ids, bal } = setup(2);
     enterRaffle(db, ids[0], 400, T0);
-    drawRaffles(db, T0 + MINUTE, () => 399);
+    drawRaffles(db, T0 + ROUND, () => 399);
     expect(bal(ids[0])).toBe(1000);
   });
 });

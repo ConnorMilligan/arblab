@@ -19,14 +19,14 @@ if (secret.length < 32) {
 const db = openDb(dbPath);
 const app = createApp({ db, secret, secureCookies: production, appUrl: process.env.APP_URL });
 
-// Deadlines are also checked before every request; this catches quiet periods.
+// Deadlines are also checked before every request; this catches quiet periods and draws raffles promptly.
 const timer = setInterval(() => {
   try {
     tick(db, Date.now());
   } catch (err) {
     console.error('tick failed', err);
   }
-}, 60_000);
+}, 5_000);
 
 const port = Number(process.env.PORT ?? 3000);
 serve({ fetch: app.fetch, port }, (info) => console.log(`Listening on http://localhost:${info.port} (db: ${dbPath})`));

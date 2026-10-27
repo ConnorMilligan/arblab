@@ -203,8 +203,8 @@ export function rulesPage(ctx: PageCtx): string {
 
 <h2>Raffle</h2>
 <ul>
-  <li>A raffle is drawn at the end of every minute (UTC). Any member can put points into the current one.</li>
-  <li>Each point is a ticket, and one ticket wins the whole pot, so your chance is your share of the pot. Entries are final, and you can add to yours until the minute ends.</li>
+  <li>A raffle is drawn every 10 seconds. Any member can put points into the current one.</li>
+  <li>Each point is a ticket, and one ticket wins the whole pot, so your chance is your share of the pot. Entries are final, and you can add to yours until the round ends.</li>
   <li>If you are the only entrant you get your points back. Raffles do not count towards the leaderboard.</li>
 </ul>
 

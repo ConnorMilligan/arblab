@@ -336,7 +336,7 @@ describe('raffle', () => {
     await bob.post('/raffle/enter', { amount: '5000' });
     expect(await bob.text('/raffle')).toContain('Not enough points');
 
-    now += 60_000; // rng is 0, so the first ticket (Ann's) wins
+    now += 10_000; // rng is 0, so the first ticket (Ann's) wins
     const page = await ann.text('/raffle');
     expect(page).toContain('Recent draws');
     expect(balanceOf(db, a)).toBe(1200);

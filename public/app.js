@@ -7,7 +7,8 @@ for (const el of document.querySelectorAll('time[datetime]')) {
   const d = new Date(el.getAttribute('datetime'));
   if (!Number.isNaN(d.getTime())) {
     el.title = el.textContent;
-    el.textContent = d.toLocaleString(undefined, el.hasAttribute('data-short') ? short : long);
+    const style = el.hasAttribute('data-short') ? short : long;
+    el.textContent = d.toLocaleString(undefined, el.hasAttribute('data-seconds') ? { ...style, second: '2-digit' } : style);
   }
 }
 
