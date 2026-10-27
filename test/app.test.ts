@@ -109,9 +109,8 @@ describe('access', () => {
 
   it('limits one client address across many names', async () => {
     member('Bob');
-    for (let i = 0; i < 20; i++) member(`Member${i}`);
-    for (let i = 0; i < 20; i++) expect((await attempt(`Member${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
-    expect((await attempt('Member0', 'nope', from('203.0.113.9'))).status).toBe(429);
+    for (let i = 0; i < 20; i++) expect((await attempt(`ghost${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
+    expect((await attempt('ghost-new', 'nope', from('203.0.113.9'))).status).toBe(429);
     expect((await attempt('Bob', PASSWORD, from('203.0.113.10'))).status).toBe(303);
   });
 
@@ -134,11 +133,14 @@ describe('access', () => {
     expect((await tryLogin(PASSWORD, '10.9.9.99')).status).toBe(429);
   });
 
-  it('puts every made-up name in one bucket so they cannot grow the limiter', async () => {
+  it('treats members and made-up names identically, so a 429 does not reveal who is a member', async () => {
     member('Bob');
-    for (let i = 0; i < 5; i++) expect((await attempt(`ghost${i}`, 'nope', from('203.0.113.9'))).status).toBe(401);
-    expect((await attempt('another-ghost', 'nope', from('203.0.113.9'))).status).toBe(429);
-    expect((await attempt('Bob', PASSWORD, from('203.0.113.9'))).status).toBe(303);
+    const ip = from('203.0.113.9');
+    for (const name of ['Bob', 'Ghost']) {
+      for (let i = 0; i < 5; i++) expect((await attempt(name, 'nope', ip)).status).toBe(401);
+      expect((await attempt(name, 'nope', ip)).status).toBe(429);
+    }
+    expect((await attempt('Other-ghost', 'nope', ip)).status).toBe(401);
   });
 
   it('revokes the session on the server at logout, so a copied cookie stops working', async () => {

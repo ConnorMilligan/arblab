@@ -263,11 +263,9 @@ export function createApp(opts: AppOptions): Hono<Env> {
   app.post('/login', async (c) => {
     const form = await c.req.parseBody();
     const name = field(form, 'name');
-    const user = getUserByName(db, name);
-    // Names that don't exist share one bucket, so made-up names can't grow the limiter's memory.
-    const who = user?.display_name ?? '\0unknown';
+    // Keyed on the submitted name, whether or not it exists, so the response never reveals members.
     const ip = clientIp(c);
-    const wait = limiter.retryAfter(who, ip, c.get('now'));
+    const wait = limiter.retryAfter(name, ip, c.get('now'));
     if (wait > 0) {
       c.header('Retry-After', String(wait));
       return c.html(
@@ -275,13 +273,14 @@ export function createApp(opts: AppOptions): Hono<Env> {
         429,
       );
     }
+    const user = getUserByName(db, name);
     const ok = await bcrypt.compare(field(form, 'password'), user?.password_hash ?? dummyHash);
     if (!user || !ok) {
-      limiter.fail(who, ip, c.get('now'));
+      limiter.fail(name, ip, c.get('now'));
       return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
     }
     if (!user.is_active) return c.html(loginPage(ctx(c, { kind: 'error', message: 'This account has been deactivated.' }), name), 403);
-    limiter.succeed(who, ip);
+    limiter.succeed(name, ip);
     await startSession(c, user.id);
     return c.redirect('/', 303);
   });

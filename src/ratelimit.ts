@@ -12,8 +12,9 @@ export const LOGIN_MAX_PER_NAME = 30;
  * - client address (20): stops one client sweeping many names.
  * - name (30): a backstop against guessing spread across many addresses.
  * There is deliberately no global cap, because that would let one client pause logins for all.
- * Callers pass a canonical name (all non-members share one), so memory grows with members and
- * addresses, not with attacker-chosen strings. In memory: a restart clears it, which is fine for a single-instance app.
+ * Names are keyed as submitted, member or not, so a 429 never reveals who is a member. Memory is
+ * bounded by the per-address limit: one address can record at most 20 failures per window. Only
+ * expired buckets are ever dropped. In memory: a restart clears it, which is fine for a single-instance app.
  */
 export class LoginLimiter {
   private buckets = new Map<string, number[]>();
