@@ -1,9 +1,19 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import type { MarketListRow } from '../domain/markets.ts';
 import { impliedYes } from '../domain/payout.ts';
 import { type Html, html } from '../html.ts';
 import { formatDuration, formatUtc } from '../time.ts';
 
 export const APP_NAME = 'Arblab';
+
+// Static files are cached for an hour, so their URLs carry a hash of the content: an edit gets fetched at once.
+const assetUrl = (file: string): string => {
+  const body = readFileSync(new URL(`../../public/${file}`, import.meta.url));
+  return `/static/${file}?v=${createHash('sha256').update(body).digest('hex').slice(0, 10)}`;
+};
+const STYLE_URL = assetUrl('style.css');
+const SCRIPT_URL = assetUrl('app.js');
 
 export interface Viewer {
   id: number;
@@ -31,8 +41,8 @@ export function page(ctx: PageCtx, title: string, body: Html): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${title} · ${APP_NAME}</title>
-<link rel="stylesheet" href="/static/style.css">
-<script src="/static/app.js" defer></script>
+<link rel="stylesheet" href="${STYLE_URL}">
+<script src="${SCRIPT_URL}" defer></script>
 </head>
 <body>
 <header>
