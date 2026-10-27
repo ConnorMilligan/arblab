@@ -58,7 +58,7 @@ export function page(ctx: PageCtx, title: string, body: Html): string {
     <a href="/rules">Rules</a>
   </nav>
   <div class="me">
-    <span title="Play points. No cash value.">${pts(v.balance)}</span>
+    <span id="balance" title="Play points. No cash value.">${pts(v.balance)}</span>
     <form method="post" action="/logout"><button class="link">Log out ${v.name}</button></form>
   </div>`
     : html`<nav><a href="/login">Log in</a> <a href="/rules">Rules</a></nav>`}

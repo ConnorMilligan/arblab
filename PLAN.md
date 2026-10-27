@@ -45,7 +45,7 @@ test/*.test.ts         vitest
 
 Ledger types: `allowance`, `stake`, `winnings`, `refund`, `bond`, `bond_return`, `jury_reward`, `raffle_stake`, `raffle_win`.
 
-Raffles: `raffle_entries` (round = the start of a 10-second window, user, amount) and `raffle_draws` (one row per drawn
+Raffles: `raffle_entries` (round = the start of a 30-second window, user, amount) and `raffle_draws` (one row per drawn
 round). Each point is a ticket and one ticket takes the whole pot. `tick()` draws every finished round
 that has entries and no draw row, so a missed round is drawn late rather than lost.
 

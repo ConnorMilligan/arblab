@@ -334,9 +334,14 @@ describe('raffle', () => {
     expect(await ann.text('/raffle')).toContain('Pot: <b>500 pts</b>');
 
     await bob.post('/raffle/enter', { amount: '5000' });
+    await bob.get('/raffle/state'); // background polling must not swallow the message
     expect(await bob.text('/raffle')).toContain('Not enough points');
 
-    now += 10_000; // rng is 0, so the first ticket (Ann's) wins
+    const live = await ann.get('/raffle/state');
+    expect(live.headers.get('cache-control')).toBe('no-store');
+    expect(await live.json()).toMatchObject({ left: 30_000, balance: 700, balanceText: '700 pts' });
+
+    now += 30_000; // rng is 0, so the first ticket (Ann's) wins
     const page = await ann.text('/raffle');
     expect(page).toContain('Recent draws');
     expect(balanceOf(db, a)).toBe(1200);

@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS jurors (
   PRIMARY KEY (market_id, user_id)
 );
 
--- Raffle rounds are the 10-second window starting at round (ms). A member has one entry per round; entering again adds to it.
+-- Raffle rounds are the 30-second window starting at round (ms). A member has one entry per round; entering again adds to it.
 CREATE TABLE IF NOT EXISTS raffle_entries (
   round INTEGER NOT NULL,
   user_id INTEGER NOT NULL REFERENCES users(id),

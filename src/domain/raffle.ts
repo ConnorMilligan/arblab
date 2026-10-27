@@ -3,8 +3,8 @@ import { requireActive } from './markets.ts';
 import { credit, debit } from './points.ts';
 import type { Rng } from './resolution.ts';
 
-/** Rounds are consecutive 10-second windows; a round's raffle is drawn when its window ends. */
-export const ROUND = 10_000;
+/** Rounds are consecutive 30-second windows; a round's raffle is drawn when its window ends. */
+export const ROUND = 30_000;
 export const roundStart = (t: number): number => Math.floor(t / ROUND) * ROUND;
 
 /** Puts points into the current round. Entering again in the same round adds to the entry. */

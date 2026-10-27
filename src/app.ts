@@ -71,7 +71,7 @@ import {
   signupPage,
 } from './views/account.ts';
 import type { Flash, PageCtx } from './views/layout.ts';
-import { rafflePage } from './views/raffle.ts';
+import { rafflePage, raffleState } from './views/raffle.ts';
 import { type TodoItem, marketPage, marketsPage, newMarketPage } from './views/markets.ts';
 
 export interface AppOptions {
@@ -231,9 +231,10 @@ export function createApp(opts: AppOptions): Hono<Env> {
     setCookie(c, 'flash', JSON.stringify({ kind, message }), { httpOnly: true, secure, sameSite: 'Lax', path: '/', maxAge: 60 });
   }
 
-  function ctx(c: Context<Env>, override?: Flash): PageCtx {
+  /** `peek` leaves a pending flash message alone, for background polling that no one sees. */
+  function ctx(c: Context<Env>, override?: Flash, peek = false): PageCtx {
     let f: Flash | null = override ?? null;
-    const stored = getCookie(c, 'flash');
+    const stored = peek ? undefined : getCookie(c, 'flash');
     if (stored) {
       deleteCookie(c, 'flash', { path: '/' });
       try {
@@ -503,9 +504,20 @@ export function createApp(opts: AppOptions): Hono<Env> {
 
   // ---- raffle ----
 
+  const raffleData = (c: Context<Env>) => ({
+    round: roundStart(c.get('now')),
+    entries: currentEntries(db, c.get('now')),
+    draws: recentDraws(db, c.get('user')!.id),
+  });
+
   app.get('/raffle', (c) => {
-    const now = c.get('now');
-    return c.html(rafflePage(ctx(c), roundStart(now), currentEntries(db, now), recentDraws(db, c.get('user')!.id)));
+    return c.html(rafflePage(ctx(c), raffleData(c)));
+  });
+
+  // Polled by app.js so the page stays current without a reload.
+  app.get('/raffle/state', (c) => {
+    c.header('Cache-Control', 'no-store');
+    return c.json(raffleState(ctx(c, undefined, true), raffleData(c)));
   });
 
   app.post('/raffle/enter', (c) =>

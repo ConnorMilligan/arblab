@@ -94,7 +94,7 @@ src/domain/          every rule, as plain functions taking (db, ..., now)
   users.ts           invites, 50-member cap, deactivation
   markets.ts         creation + checklist, subject opt-in, bets, final payout
   payout.ts          pure parimutuel math (rounding and leftover points)
-  raffle.ts          stake-weighted raffles every 10 seconds: entries and draws
+  raffle.ts          stake-weighted raffles every 30 seconds: entries and draws
   resolution.ts      proposals, disputes, jury draw, voting, bond forfeiture
   tick.ts            applies every deadline that has passed; safe to run repeatedly
 src/views/           HTML templates (tagged template literals with auto-escaping)
