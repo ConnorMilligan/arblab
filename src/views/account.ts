@@ -35,8 +35,8 @@ export function signupPage(ctx: PageCtx, token: string, inviter: string, name = 
 <form method="post" action="/invite/${token}" class="stack narrow">
   <label>Display name <small>2–24 characters. Others will see this.</small>
     <input name="name" required minlength="2" maxlength="24" value="${name}" autocomplete="username"></label>
-  <label>Password <small>At least 10 characters.</small>
-    <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+  <label>Password <small>At least 8 characters.</small>
+    <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
   <label class="check"><input type="checkbox" name="adult" value="yes" required> I confirm I am 18 or older.</label>
   <button>Join</button>
 </form>`,
@@ -50,9 +50,9 @@ export function resetPage(ctx: PageCtx, token: string, name: string): string {
     html`<h1>Reset password</h1>
 <p>Choose a new password for <b>${name}</b>. You will be logged out everywhere and asked to log in again.</p>
 <form method="post" action="/reset/${token}" class="stack narrow">
-  <label>New password <small>At least 10 characters.</small>
-    <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
-  <label>Repeat it <input type="password" name="again" required minlength="10" autocomplete="new-password"></label>
+  <label>New password <small>At least 8 characters.</small>
+    <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+  <label>Repeat it <input type="password" name="again" required minlength="8" autocomplete="new-password"></label>
   <button>Set password</button>
 </form>`,
   );
@@ -102,7 +102,7 @@ ${ledger.map(
 <h2>Change password</h2>
 <form method="post" action="/me/password" class="stack narrow">
   <label>Current password <input type="password" name="current" required autocomplete="current-password"></label>
-  <label>New password <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+  <label>New password <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
   <button>Change password</button>
 </form>`,
   );
