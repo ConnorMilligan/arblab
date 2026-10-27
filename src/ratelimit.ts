@@ -41,7 +41,10 @@ export class LoginLimiter {
   }
 
   private keys(name: string, ip: string): [string, number][] {
-    const n = name.trim().toLowerCase();
+    // Keys are clipped: a member name is at most 24 characters, so a longer one can never match and
+    // clipping it changes nothing, while attacker-sized strings can't fill memory.
+    const n = name.trim().toLowerCase().slice(0, 32);
+    ip = ip.slice(0, 64);
     return [
       [`ni:${n}|${ip}`, LOGIN_MAX_PER_NAME_AND_IP],
       [`i:${ip}`, LOGIN_MAX_PER_IP],

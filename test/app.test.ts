@@ -143,6 +143,13 @@ describe('access', () => {
     expect((await attempt('Other-ghost', 'nope', ip)).status).toBe(401);
   });
 
+  it('clips long names when counting, so oversized names cannot fill memory but still count', async () => {
+    const ip = from('203.0.113.9');
+    const long = 'x'.repeat(5000);
+    for (let i = 0; i < 5; i++) expect((await attempt(long + i, 'nope', ip)).status).toBe(401);
+    expect((await attempt(long + 'z', 'nope', ip)).status).toBe(429);
+  });
+
   it('revokes the session on the server at logout, so a copied cookie stops working', async () => {
     member('Bob');
     const cookie = (await attempt('Bob', PASSWORD)).headers.getSetCookie()[0].split(';')[0];
