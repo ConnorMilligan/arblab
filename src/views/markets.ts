@@ -115,7 +115,7 @@ export function marketPage(ctx: PageCtx, d: MarketPageData): string {
     ctx,
     m.question,
     html`<article class="market">
-<p class="muted">Market #${m.id} · created by ${m.creator_name} ${when(m.created_at)}</p>
+<p class="muted">Created by ${m.creator_name} ${when(m.created_at)}</p>
 ${m.deleted_at !== null
   ? html`<p class="notice">${d.deletedBy} deleted this market ${when(m.deleted_at)}. Every stake and bond was returned, and it no longer appears in the lists.</p>`
   : ''}
@@ -176,7 +176,7 @@ function deleteSection(d: MarketPageData): Html {
   <summary>Delete this market</summary>
   <p>Deleting cancels it for everyone${others ? ': every stake goes back to whoever placed it' : ''}${d.proposal ? ', and any bond still held is returned' : ''}.
      It disappears from the lists. This can't be undone.</p>
-  <form method="post" action="/markets/${m.id}/delete" class="stack narrow">
+  <form method="post" action="/markets/${m.public_id}/delete" class="stack narrow">
     <label class="check"><input type="checkbox" name="confirm" value="yes" required> Yes, delete this market</label>
     <button class="secondary">Delete market</button>
   </form>
@@ -197,7 +197,7 @@ function actionSection(ctx: PageCtx, d: MarketPageData, isSubject: boolean): Htm
   <h2>This market is about you</h2>
   <p>${m.creator_name} wants to run this market with you as its subject. If you opt in, members can bet on it. You never can.
      If you decline, the market is cancelled. Nobody has bet yet.</p>
-  <form method="post" action="/markets/${m.id}/subject" class="inline">
+  <form method="post" action="/markets/${m.public_id}/subject" class="inline">
     <button name="answer" value="accept">Opt in</button>
     <button name="answer" value="decline" class="secondary">Decline</button>
   </form>
@@ -208,7 +208,7 @@ function actionSection(ctx: PageCtx, d: MarketPageData, isSubject: boolean): Htm
       if (isSubject) return html`<p class="notice">You are the subject of this market, so you cannot bet on it.</p>`;
       return html`<section>
   <h2>Place a bet</h2>
-  <form method="post" action="/markets/${m.id}/bet" class="stack">
+  <form method="post" action="/markets/${m.public_id}/bet" class="stack">
     ${outcomeRadios('side', ['YES', 'NO'])}
     <label>Points <input type="number" name="amount" min="1" max="${d.balance}" step="1" required inputmode="numeric"></label>
     <button>Place bet</button>
@@ -222,7 +222,7 @@ function actionSection(ctx: PageCtx, d: MarketPageData, isSubject: boolean): Htm
   <p>Trading has closed. Any member can propose the outcome by posting a bond of <b>${pts(d.bond)}</b>
      (10% of the pool, at least 50). If nobody disputes it within 24 hours, it stands and the bond comes back.
      If nobody proposes by ${when(m.close_at + PROPOSAL_DEADLINE)}, the market is voided and every stake refunded.</p>
-  <form method="post" action="/markets/${m.id}/propose" class="stack">
+  <form method="post" action="/markets/${m.public_id}/propose" class="stack">
     ${outcomeRadios('outcome', ['YES', 'NO', 'VOID'])}
     <label>Evidence note <small>What happened, and where you checked.</small>
       <textarea name="note" required minlength="5" maxlength="1000" rows="3"></textarea></label>
@@ -245,7 +245,7 @@ function actionSection(ctx: PageCtx, d: MarketPageData, isSubject: boolean): Htm
     ? html`<p class="flash error">Only ${d.eligibleIfIDispute} member${d.eligibleIfIDispute === 1 ? ' is' : 's are'} free to sit on a jury here,
         so a dispute would void the market and return both bonds.</p>`
     : ''}
-  <form method="post" action="/markets/${m.id}/dispute" class="stack">
+  <form method="post" action="/markets/${m.public_id}/dispute" class="stack">
     <label>Why it's wrong <textarea name="note" required minlength="5" maxlength="1000" rows="3"></textarea></label>
     <button>Post ${pts(p.bond)} bond and dispute</button>
   </form>
@@ -260,7 +260,7 @@ function actionSection(ctx: PageCtx, d: MarketPageData, isSubject: boolean): Htm
   <h2>You're on the jury</h2>
   <p>Read the criteria, evidence source and both notes, then vote. Your vote is final and hidden until voting closes.
      At least ${QUORUM} votes and a 2/3 majority decide. Jurors in the majority share the losing bond.</p>
-  <form method="post" action="/markets/${m.id}/vote" class="stack">
+  <form method="post" action="/markets/${m.public_id}/vote" class="stack">
     ${outcomeRadios('vote', ['YES', 'NO', 'VOID'])}
     <button>Cast vote</button>
   </form>

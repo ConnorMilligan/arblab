@@ -152,7 +152,7 @@ export function marketList(rows: MarketListRow[], now: number, empty: string): H
   if (rows.length === 0) return html`<p class="muted">${empty}</p>`;
   return html`<ul class="markets">${rows.map(
     (m) => html`<li>
-  <a href="/markets/${m.id}">${m.question}</a>
+  <a href="/markets/${m.public_id}">${m.question}</a>
   <div class="meta">${statusLine(m, now)}${m.status === 'open' || m.status === 'pending' ? html` (${zonedWhen(m.close_at, m.timezone, true)})` : ''}${m.subject_name ? html` · about ${m.subject_name}` : ''} · pool ${pts(m.yes_pool + m.no_pool)}</div>
   ${m.status === 'resolved' ? '' : poolBar(m.yes_pool, m.no_pool)}
 </li>`,

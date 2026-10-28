@@ -4,7 +4,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { openDb } from '../src/db.ts';
-import { createMarket, getMarket, placeBet, pools, respondAsSubject } from '../src/domain/markets.ts';
+import {
+  createMarket,
+  getMarket,
+  marketIdFromUrl,
+  placeBet,
+  pools,
+  publicIdForOldNumber,
+  respondAsSubject,
+} from '../src/domain/markets.ts';
 import { tick } from '../src/domain/tick.ts';
 import { DAY, TIME_ZONES, timeZoneOptions, wallTimeToEpoch, zoneName } from '../src/time.ts';
 import { T0, makeMarket, setup } from './helpers.ts';
@@ -159,6 +167,23 @@ describe('migrations', () => {
     old.close();
     const db = openDb(path);
     expect(db.prepare('SELECT timezone FROM markets').get()).toEqual({ timezone: null });
+    db.close();
+  });
+});
+
+describe('public ids', () => {
+  it('gives markets in a database from before random ids one, and keeps their number for old links', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'arblab-')), 'old.db');
+    const old = new Database(path);
+    old.exec('CREATE TABLE markets (id INTEGER PRIMARY KEY, close_at INTEGER NOT NULL, status TEXT NOT NULL)');
+    old.exec("INSERT INTO markets (close_at, status) VALUES (1, 'open'), (2, 'open')");
+    old.close();
+    const db = openDb(path);
+    const rows = db.prepare('SELECT id, public_id, old_number FROM markets ORDER BY id').all() as { id: number; public_id: string; old_number: number }[];
+    expect(rows.map((r) => r.old_number)).toEqual([1, 2]);
+    expect(new Set(rows.map((r) => r.public_id)).size).toBe(2);
+    expect(marketIdFromUrl(db, rows[1].public_id)).toBe(2);
+    expect(publicIdForOldNumber(db, 1)).toBe(rows[0].public_id);
     db.close();
   });
 });

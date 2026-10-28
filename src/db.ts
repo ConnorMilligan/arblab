@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { newPublicId } from './ids.ts';
 
 export type DB = Database.Database;
 
@@ -61,7 +62,9 @@ CREATE TABLE IF NOT EXISTS invites (
 );
 
 CREATE TABLE IF NOT EXISTS markets (
-  id INTEGER PRIMARY KEY,
+  id INTEGER PRIMARY KEY, -- internal only; pages and links use public_id
+  public_id TEXT NOT NULL, -- random, e.g. k3J9xQpL
+  old_number INTEGER, -- the id its links used before markets had random ids
   creator_id INTEGER NOT NULL REFERENCES users(id),
   question TEXT NOT NULL,
   criteria TEXT NOT NULL,
@@ -82,6 +85,8 @@ CREATE TABLE IF NOT EXISTS markets (
   CHECK ((status = 'resolved') = (outcome IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS markets_status ON markets(status);
+CREATE UNIQUE INDEX IF NOT EXISTS markets_public_id ON markets(public_id);
+CREATE UNIQUE INDEX IF NOT EXISTS markets_old_number ON markets(old_number);
 
 CREATE TABLE IF NOT EXISTS bets (
   id INTEGER PRIMARY KEY,
@@ -180,6 +185,18 @@ function addColumn(db: DB, table: string, column: string, type: string): void {
   if (cols.length && !cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }
 
+/** Markets made before random ids get one, and keep their number so old links still lead to them. */
+function giveMarketsPublicIds(db: DB): void {
+  const cols = (db.prepare('PRAGMA table_info(markets)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.length || cols.includes('public_id')) return;
+  db.transaction(() => {
+    db.exec('ALTER TABLE markets ADD COLUMN public_id TEXT');
+    db.exec('ALTER TABLE markets ADD COLUMN old_number INTEGER');
+    const give = db.prepare('UPDATE markets SET public_id = ?, old_number = id WHERE id = ?');
+    for (const { id } of db.prepare('SELECT id FROM markets').all() as { id: number }[]) give.run(newPublicId(), id);
+  })();
+}
+
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -190,6 +207,7 @@ export function openDb(path: string): DB {
   addColumn(db, 'markets', 'timezone', 'TEXT'); // market time zones
   addColumn(db, 'markets', 'deleted_at', 'INTEGER'); // deleting markets
   addColumn(db, 'markets', 'deleted_by', 'INTEGER REFERENCES users(id)');
+  giveMarketsPublicIds(db);
   db.exec(SCHEMA);
   return db;
 }

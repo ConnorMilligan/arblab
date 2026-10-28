@@ -85,7 +85,7 @@ export function mePage(ctx: PageCtx, positions: Position[], ledger: LedgerRow[])
 ${positions.length
   ? html`<div class="scroll"><table><thead><tr><th>Market</th><th class="num">YES</th><th class="num">NO</th><th>Status</th><th class="num">Result</th></tr></thead><tbody>
     ${positions.map(
-      (p) => html`<tr><td><a href="/markets/${p.id}">${p.question}</a></td><td class="num">${p.yes}</td><td class="num">${p.no}</td>
+      (p) => html`<tr><td><a href="/markets/${p.public_id}">${p.question}</a></td><td class="num">${p.yes}</td><td class="num">${p.no}</td>
         <td>${p.status === 'resolved' ? p.outcome : p.status}</td><td class="num">${p.status === 'resolved' ? signed(p.net) : '–'}</td></tr>`,
     )}</tbody></table></div>`
   : html`<p class="muted">No bets yet.</p>`}
@@ -95,7 +95,7 @@ ${positions.length
 <div class="scroll"><table><thead><tr><th>When</th><th>What</th><th class="num">Change</th><th class="num">Balance</th></tr></thead><tbody>
 ${ledger.map(
   (l) => html`<tr><td>${when(l.created_at, true)}</td>
-    <td>${LEDGER_LABELS[l.type]}${l.market_id ? html`<small><a href="/markets/${l.market_id}">${l.question}</a></small>` : ''}</td>
+    <td>${LEDGER_LABELS[l.type]}${l.market_public_id ? html`<small><a href="/markets/${l.market_public_id}">${l.question}</a></small>` : ''}</td>
     <td class="num">${signed(l.amount)}</td><td class="num">${l.running.toLocaleString('en-US')}</td></tr>`,
 )}</tbody></table></div>
 

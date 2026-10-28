@@ -223,15 +223,15 @@ export function closeVoting(db: DB, marketId: number, now: number, reason?: stri
 }
 
 /** Open juries this member sits on and hasn't voted in yet. */
-export function juryDuty(db: DB, userId: number): { id: number; question: string; voting_ends_at: number }[] {
+export function juryDuty(db: DB, userId: number): { id: number; public_id: string; question: string; voting_ends_at: number }[] {
   return db
     .prepare(
-      `SELECT m.id, m.question, d.voting_ends_at
+      `SELECT m.id, m.public_id, m.question, d.voting_ends_at
        FROM jurors j JOIN disputes d ON d.market_id = j.market_id JOIN markets m ON m.id = j.market_id
        WHERE j.user_id = ? AND j.vote IS NULL AND d.closed_at IS NULL
        ORDER BY d.voting_ends_at`,
     )
-    .all(userId) as { id: number; question: string; voting_ends_at: number }[];
+    .all(userId) as { id: number; public_id: string; question: string; voting_ends_at: number }[];
 }
 
 /**

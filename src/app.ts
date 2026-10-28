@@ -12,11 +12,14 @@ import {
   type MarketGroup,
   betsFor,
   createMarket,
+  getMarket,
   getMarketRow,
   listMarkets,
+  marketIdFromUrl,
   pendingOptIns,
   placeBet,
   positionsFor,
+  publicIdForOldNumber,
   respondAsSubject,
   betList,
 } from './domain/markets.ts';
@@ -272,7 +275,9 @@ export function createApp(opts: AppOptions): Hono<Env> {
     return `${proto}://${c.req.header('host')}`;
   }
 
-  const marketId = (c: Context<Env>) => toInt(c.req.param('id') ?? '');
+  /** The market's internal id from the public id in its URL (NaN, so "No such market", if there's none). */
+  const marketId = (c: Context<Env>) => marketIdFromUrl(db, c.req.param('id') ?? '');
+  const backTo = (c: Context<Env>) => `/markets/${encodeURIComponent(c.req.param('id') ?? '')}`;
 
   // ---- login, invites, sign-up ----
 
@@ -388,8 +393,8 @@ export function createApp(opts: AppOptions): Hono<Env> {
     const group: MarketGroup = tab === 'awaiting' || tab === 'resolved' ? tab : 'open';
     const me = c.get('user')!.id;
     const todo: TodoItem[] = [
-      ...pendingOptIns(db, me).map((m) => ({ href: `/markets/${m.id}`, text: `Opt in or decline: ${m.question}` })),
-      ...juryDuty(db, me).map((m) => ({ href: `/markets/${m.id}`, text: `Jury duty: ${m.question}` })),
+      ...pendingOptIns(db, me).map((m) => ({ href: `/markets/${m.public_id}`, text: `Opt in or decline: ${m.question}` })),
+      ...juryDuty(db, me).map((m) => ({ href: `/markets/${m.public_id}`, text: `Jury duty: ${m.question}` })),
     ];
     return c.html(marketsPage(ctx(c), group, listMarkets(db, group), todo));
   });
@@ -425,7 +430,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
         ),
       )();
       flash(c, 'ok', 'Market created.');
-      return c.redirect(`/markets/${id}`, 303);
+      return c.redirect(`/markets/${getMarket(db, id).public_id}`, 303);
     } catch (err) {
       if (!(err instanceof RuleError)) throw err;
       return c.html(newMarketPage(ctx(c, { kind: 'error', message: err.message }), listMembers(db), values), 400);
@@ -433,6 +438,9 @@ export function createApp(opts: AppOptions): Hono<Env> {
   });
 
   app.get('/markets/:id', (c) => {
+    // Links from before random ids used the market's number.
+    const old = /^\d{1,9}$/.test(c.req.param('id')) ? publicIdForOldNumber(db, Number(c.req.param('id'))) : undefined;
+    if (old) return c.redirect(`/markets/${old}`, 301);
     const id = marketId(c);
     const me = c.get('user')!.id;
     const now = c.get('now');
@@ -469,7 +477,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
   });
 
   app.post('/markets/:id/bet', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       const side = parseSide(field(form, 'side'));
       const amount = toInt(field(form, 'amount'));
       placeBet(db, marketId(c), user.id, side, amount, now);
@@ -478,7 +486,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
   );
 
   app.post('/markets/:id/subject', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       const accept = field(form, 'answer') === 'accept';
       respondAsSubject(db, marketId(c), user.id, accept, now);
       return accept ? 'You opted in. Betting is open.' : 'You declined. The market has been cancelled.';
@@ -486,7 +494,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
   );
 
   app.post('/markets/:id/delete', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       rule(field(form, 'confirm') === 'yes', 'Tick the box to confirm you want to delete this market.');
       deleteMarket(db, marketId(c), user.id, now);
       return 'Market deleted. Every stake was returned.';
@@ -494,21 +502,21 @@ export function createApp(opts: AppOptions): Hono<Env> {
   );
 
   app.post('/markets/:id/propose', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       propose(db, marketId(c), user.id, parseOutcome(field(form, 'outcome')), field(form, 'note'), now);
       return 'Outcome proposed. The 24-hour challenge window is open.';
     }),
   );
 
   app.post('/markets/:id/dispute', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       dispute(db, marketId(c), user.id, field(form, 'note'), now, opts.rng);
       return 'Dispute filed.';
     }),
   );
 
   app.post('/markets/:id/vote', (c) =>
-    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+    act(c, backTo(c), (form, user, now) => {
       castVote(db, marketId(c), user.id, parseOutcome(field(form, 'vote')), now);
       return 'Vote recorded.';
     }),
