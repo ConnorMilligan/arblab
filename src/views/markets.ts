@@ -3,7 +3,7 @@ import type { Dispute, Juror, Proposal } from '../domain/resolution.ts';
 import { ATTESTATIONS, DISPUTES_PER_WEEK, PROPOSAL_DEADLINE, QUORUM } from '../domain/rules.ts';
 import type { MemberRow } from '../domain/users.ts';
 import { type Html, html } from '../html.ts';
-import { type PageCtx, linkify, marketList, outcomeRadios, page, poolBar, pts, signed, statusLine, until, when } from './layout.ts';
+import { type PageCtx, clock, linkify, marketList, outcomeRadios, page, poolBar, pts, signed, statusLine, until, when } from './layout.ts';
 
 const GROUPS: { key: MarketGroup; label: string; empty: string }[] = [
   { key: 'open', label: 'Open', empty: 'No open markets. Start one!' },
@@ -25,6 +25,7 @@ export function marketsPage(ctx: PageCtx, group: MarketGroup, rows: MarketListRo
       ? html`<section class="notice"><h2>Needs you</h2><ul>${todo.map((t) => html`<li><a href="${t.href}">${t.text}</a></li>`)}</ul></section>`
       : ''}
 <div class="row"><h1>Markets</h1><a class="button" href="/markets/new">New market</a></div>
+<p class="muted">Your time: ${clock(ctx.now)}</p>
 <nav class="tabs">${GROUPS.map(
       (g) => html`<a href="/?tab=${g.key}" ${g.key === group ? html`aria-current="page"` : ''}>${g.label}</a>`,
     )}</nav>
@@ -55,7 +56,7 @@ export function newMarketPage(ctx: PageCtx, members: MemberRow[], values: NewMar
   <label>Evidence source <small>Where the group will check: a link, a public record, a named person.</small>
     <input name="evidence_source" required minlength="3" maxlength="300" value="${values.evidence_source ?? ''}">
   </label>
-  <label>Trading closes <small>Your local time. No bets after this.</small>
+  <label>Trading closes <small>In <span data-tz-name>your local time</span>. No bets after this.</small>
     <input type="datetime-local" name="close_local" required value="${values.close_local ?? ''}" data-epoch="close_at_ms">
     <input type="hidden" name="close_at_ms">
   </label>
@@ -111,7 +112,8 @@ export function marketPage(ctx: PageCtx, d: MarketPageData): string {
     : ''}
   <dt>Resolution criteria</dt><dd class="pre">${m.criteria}</dd>
   <dt>Evidence source</dt><dd>${linkify(m.evidence_source)}</dd>
-  <dt>Trading ${m.close_at > ctx.now ? 'closes' : 'closed'}</dt><dd>${when(m.close_at)}</dd>
+  <dt>Trading ${m.close_at > ctx.now ? 'closes' : 'closed'}</dt><dd>${when(m.close_at)}${m.close_at > ctx.now ? html` <span class="muted">(in ${until(m.close_at, ctx.now)})</span>` : ''}</dd>
+  ${m.close_at > ctx.now ? html`<dt>Your time now</dt><dd>${clock(ctx.now)}</dd>` : ''}
 </dl>
 
 <section>

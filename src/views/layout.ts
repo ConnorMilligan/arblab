@@ -67,7 +67,9 @@ export function page(ctx: PageCtx, title: string, body: Html): string {
 ${ctx.flash ? html`<p class="flash ${ctx.flash.kind}" role="status">${ctx.flash.message}</p>` : ''}
 ${body}
 </main>
-<footer>Play points only. They have no cash value and cannot be bought, sold, transferred or redeemed. <a href="/rules">House Rules</a></footer>
+<footer>
+<label class="tz" hidden>Show times in <select id="tz"></select></label>
+Play points only. They have no cash value and cannot be bought, sold, transferred or redeemed. <a href="/rules">House Rules</a></footer>
 </body>
 </html>`.value;
 }
@@ -83,6 +85,11 @@ export function signed(n: number): string {
 /** A timestamp; app.js rewrites it in the viewer's time zone (`short` drops the year, for tables). */
 export function when(t: number, short = false): Html {
   return html`<time datetime="${new Date(t).toISOString()}" ${short ? html`data-short` : ''}>${formatUtc(t)}</time>`;
+}
+
+/** The viewer's current time; app.js keeps it ticking in their chosen time zone. */
+export function clock(now: number): Html {
+  return html`<time datetime="${new Date(now).toISOString()}" data-clock>${formatUtc(now)}</time>`;
 }
 
 export function until(t: number, now: number): string {
@@ -127,7 +134,7 @@ export function marketList(rows: MarketListRow[], now: number, empty: string): H
   return html`<ul class="markets">${rows.map(
     (m) => html`<li>
   <a href="/markets/${m.id}">${m.question}</a>
-  <div class="meta">${statusLine(m, now)}${m.subject_name ? html` · about ${m.subject_name}` : ''} · pool ${pts(m.yes_pool + m.no_pool)}</div>
+  <div class="meta">${statusLine(m, now)}${m.status === 'open' || m.status === 'pending' ? html` (${when(m.close_at, true)})` : ''}${m.subject_name ? html` · about ${m.subject_name}` : ''} · pool ${pts(m.yes_pool + m.no_pool)}</div>
   ${m.status === 'resolved' ? '' : poolBar(m.yes_pool, m.no_pool)}
 </li>`,
   )}</ul>`;
