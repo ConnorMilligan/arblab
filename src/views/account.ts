@@ -33,8 +33,8 @@ export function signupPage(ctx: PageCtx, token: string, inviter: string, name = 
 <p>${inviter} invited you to a private prediction market for friends. It runs on play points only:
    they have no cash value and can't be bought, sold, transferred or redeemed. Read the <a href="/rules">House Rules</a>.</p>
 <form method="post" action="/invite/${token}" class="stack narrow">
-  <label>Display name <small>Please use your real name, so everyone knows who's who. 2–24 characters. Others will see this.</small>
-    <input name="name" required minlength="2" maxlength="24" value="${name}" autocomplete="username" placeholder="e.g. Danny Smith"></label>
+  <label>Display name <small>2–24 characters. Others will see this.</small>
+    <input name="name" required minlength="2" maxlength="24" value="${name}" autocomplete="username"></label>
   <label>Password <small>At least 8 characters.</small>
     <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
   <label class="check"><input type="checkbox" name="adult" value="yes" required> I confirm I am 18 or older.</label>
