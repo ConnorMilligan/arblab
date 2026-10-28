@@ -20,8 +20,8 @@ export function welcomePage(ctx: PageCtx, authName: string, name: string): strin
 <p>You're signed in as <b>${authName}</b>. ${APP_NAME} is a private prediction market for friends. It runs on play points only:
    they have no cash value and can't be bought, sold, transferred or redeemed. Read the <a href="/rules">House Rules</a>.</p>
 <form method="post" action="/welcome" class="stack narrow">
-  <label>Display name <small>Please use your real name, so everyone knows who's who. 2–24 characters. Others will see this.</small>
-    <input name="name" required minlength="2" maxlength="24" value="${name}" placeholder="e.g. Danny Smith"></label>
+  <label>Display name <small>2–24 characters. Others will see this.</small>
+    <input name="name" required minlength="2" maxlength="24" value="${name}"></label>
   <label class="check"><input type="checkbox" name="adult" value="yes" required> I confirm I am 18 or older.</label>
   <button>Join</button>
 </form>`,

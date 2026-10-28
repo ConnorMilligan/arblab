@@ -103,7 +103,6 @@ describe('signing in through Authelia', () => {
     const page = await c.text('/welcome');
     expect(page).toContain('signed in as <b>newbie</b>');
     expect(page).toContain('value="Nina Newbie"');
-    expect(page).toContain('Please use your real name');
 
     expect((await c.post('/welcome', { name: 'Nina Newbie' })).status).toBe(400);
     expect((await c.post('/welcome', { name: 'Admin', adult: 'yes' })).status).toBe(400); // name taken
