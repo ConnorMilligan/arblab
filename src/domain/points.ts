@@ -116,7 +116,7 @@ export function leaderboard(db: DB, since: number): LeaderRow[] {
               (SELECT COALESCE(SUM(amount), 0) FROM ledger WHERE user_id = u.id) AS balance
        FROM users u
        LEFT JOIN ledger l ON l.user_id = u.id AND l.type <> 'allowance'
-         AND l.market_id IN (SELECT id FROM markets WHERE status = 'resolved' AND resolved_at >= ?)
+         AND l.market_id IN (SELECT id FROM markets WHERE status = 'resolved' AND resolved_at >= ? AND deleted_at IS NULL)
        WHERE u.is_active = 1
        GROUP BY u.id
        ORDER BY net DESC, markets DESC, u.display_name`,

@@ -77,6 +77,8 @@ CREATE TABLE IF NOT EXISTS markets (
   attestation TEXT NOT NULL,
   attested_at INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
+  deleted_at INTEGER, -- deleted markets are VOID with everything returned, and hidden from the lists
+  deleted_by INTEGER REFERENCES users(id),
   CHECK ((status = 'resolved') = (outcome IS NOT NULL))
 );
 CREATE INDEX IF NOT EXISTS markets_status ON markets(status);
@@ -186,6 +188,8 @@ export function openDb(path: string): DB {
   db.pragma('busy_timeout = 5000');
   migrateLedger(db);
   addColumn(db, 'markets', 'timezone', 'TEXT'); // market time zones
+  addColumn(db, 'markets', 'deleted_at', 'INTEGER'); // deleting markets
+  addColumn(db, 'markets', 'deleted_by', 'INTEGER REFERENCES users(id)');
   db.exec(SCHEMA);
   return db;
 }

@@ -344,6 +344,22 @@ describe('markets over HTTP', () => {
     expect(form).toContain('data-viewer-zone');
   });
 
+  it('deletes a market only with the box ticked, then hides it but keeps its page', async () => {
+    member('Admin', true);
+    const a = client();
+    await a.login('Admin');
+    const created = await a.post('/markets', marketForm());
+    const path = created.headers.get('location')!;
+    expect(await a.text(path)).toContain('Delete this market');
+    await a.post(`${path}/delete`, {});
+    expect(await a.text(path)).toContain('Tick the box');
+    await a.post(`${path}/delete`, { confirm: 'yes' });
+    const page = await a.text(path);
+    expect(page).toContain('Admin deleted this market');
+    expect(page).not.toContain('Delete this market');
+    expect(await a.text('/?tab=resolved')).not.toContain(`href="${path}"`);
+  });
+
   it('applies deadlines lazily on the next request', async () => {
     member('Admin', true);
     const a = client();

@@ -102,6 +102,8 @@ export interface MarketPageData {
   disputesLeft: number;
   eligibleIfIDispute: number;
   jurySize: number;
+  canDelete: boolean;
+  deletedBy: string | null;
 }
 
 export function marketPage(ctx: PageCtx, d: MarketPageData): string {
@@ -114,6 +116,9 @@ export function marketPage(ctx: PageCtx, d: MarketPageData): string {
     m.question,
     html`<article class="market">
 <p class="muted">Market #${m.id} · created by ${m.creator_name} ${when(m.created_at)}</p>
+${m.deleted_at !== null
+  ? html`<p class="notice">${d.deletedBy} deleted this market ${when(m.deleted_at)}. Every stake and bond was returned, and it no longer appears in the lists.</p>`
+  : ''}
 <h1>${m.question}</h1>
 <p>${statusLine(m, ctx.now)}</p>
 <dl>
@@ -152,6 +157,8 @@ ${actionSection(ctx, d, isSubject)}
     : html`<p class="muted">No bets yet.</p>`}
 </section>
 
+${d.canDelete ? deleteSection(d) : ''}
+
 <details>
   <summary>Creator's checklist</summary>
   <p>${m.creator_name} confirmed at ${when(m.attested_at)} that this market:</p>
@@ -159,6 +166,21 @@ ${actionSection(ctx, d, isSubject)}
 </details>
 </article>`,
   );
+}
+
+/** Folded away, and the box must be ticked, so a market isn't deleted by a stray click. */
+function deleteSection(d: MarketPageData): Html {
+  const { m } = d;
+  const others = d.bets.length > 0;
+  return html`<details class="danger">
+  <summary>Delete this market</summary>
+  <p>Deleting cancels it for everyone${others ? ': every stake goes back to whoever placed it' : ''}${d.proposal ? ', and any bond still held is returned' : ''}.
+     It disappears from the lists. This can't be undone.</p>
+  <form method="post" action="/markets/${m.id}/delete" class="stack narrow">
+    <label class="check"><input type="checkbox" name="confirm" value="yes" required> Yes, delete this market</label>
+    <button class="secondary">Delete market</button>
+  </form>
+</details>`;
 }
 
 function ratio(total: number, side: number): string {

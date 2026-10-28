@@ -32,6 +32,8 @@ export interface Market {
   attestation: string;
   attested_at: number;
   created_at: number;
+  deleted_at: number | null;
+  deleted_by: number | null;
 }
 
 export interface MarketInput {
@@ -178,7 +180,7 @@ export function listMarkets(db: DB, group: MarketGroup): MarketListRow[] {
   const g = LIST_GROUPS[group];
   const marks = g.statuses.map(() => '?').join(', ');
   return db
-    .prepare(`${LIST_SELECT} WHERE m.status IN (${marks}) ORDER BY ${g.order} LIMIT 200`)
+    .prepare(`${LIST_SELECT} WHERE m.status IN (${marks}) AND m.deleted_at IS NULL ORDER BY ${g.order} LIMIT 200`)
     .all(...g.statuses) as MarketListRow[];
 }
 

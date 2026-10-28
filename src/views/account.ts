@@ -176,7 +176,7 @@ export function rulesPage(ctx: PageCtx): string {
 <h2>Membership</h2>
 <ul>
   <li>Invite-only, 18+ only, at most ${MAX_MEMBERS} active members.</li>
-  <li>Any member can create a single-use invite link. The admin can deactivate members and create password reset links for them (a reset link lets whoever uses it set that member's password), and has no other special powers.</li>
+  <li>Any member can create a single-use invite link. The admin can deactivate members, delete markets that haven't been resolved, and create password reset links for members (a reset link lets whoever uses it set that member's password), and has no other special powers.</li>
 </ul>
 
 <h2>Points</h2>

@@ -169,7 +169,9 @@ The spec left a few things open. These are the choices made (more detail in PLAN
   member's sessions when used. The admin's own password is reset with the `reset-password` CLI command.
 - Login rate limiting counts failures in memory over 15 minutes: 5 per name from one client address, 20 per address, and 30 per name overall. The address comes from `X-Forwarded-For` when the request comes from the host-side proxy, and from `Cf-Connecting-Ip` otherwise. There is no global cap, so one client cannot pause logins for everyone. A restart clears the counts.
 - Sessions are server-side rows: logging out, changing a password or deactivating a member revokes them.
-- Markets and bets can't be edited, cancelled or deleted once created. No comments or discussion.
+- Markets and bets can't be edited once created. No comments or discussion. A market's creator can delete
+  it while nobody else has bet and no outcome has been proposed; an admin can delete any market that isn't
+  resolved. Deleting voids it, returns every stake and bond, and hides it from the lists and leaderboard.
 - No pagination. Lists show up to 200 rows.
 - No migration tool. The schema is `CREATE TABLE IF NOT EXISTS`, so a future schema change needs a
   small migration step.

@@ -134,6 +134,7 @@ export function statusLine(m: MarketListRow, now: number): Html {
     case 'disputed':
       return html`<span class="tag wait">Disputed</span> jury voting`;
     case 'resolved':
+      if (m.deleted_at !== null) return html`<span class="tag">Deleted</span>`;
       return html`<span class="tag ${m.outcome?.toLowerCase()}">Resolved ${m.outcome}</span>`;
   }
 }

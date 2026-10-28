@@ -27,6 +27,8 @@ import {
   type Rng,
   bondFor,
   castVote,
+  deleteMarket,
+  deleteRefusal,
   dispute,
   disputesThisWeek,
   eligibleJurors,
@@ -459,6 +461,8 @@ export function createApp(opts: AppOptions): Hono<Env> {
         jurors: getJurors(db, id).map((j) => ({ ...j, name: nameOf(j.user_id) })),
         disputesLeft: DISPUTES_PER_WEEK - disputesThisWeek(db, me, now),
         eligibleIfIDispute: eligibleJurors(db, id).filter((u) => u !== me).length,
+        canDelete: deleteRefusal(db, id, me) === null,
+        deletedBy: m.deleted_by === null ? null : nameOf(m.deleted_by),
         jurySize: jurySize(db),
       }),
     );
@@ -478,6 +482,14 @@ export function createApp(opts: AppOptions): Hono<Env> {
       const accept = field(form, 'answer') === 'accept';
       respondAsSubject(db, marketId(c), user.id, accept, now);
       return accept ? 'You opted in. Betting is open.' : 'You declined. The market has been cancelled.';
+    }),
+  );
+
+  app.post('/markets/:id/delete', (c) =>
+    act(c, `/markets/${marketId(c)}`, (form, user, now) => {
+      rule(field(form, 'confirm') === 'yes', 'Tick the box to confirm you want to delete this market.');
+      deleteMarket(db, marketId(c), user.id, now);
+      return 'Market deleted. Every stake was returned.';
     }),
   );
 
