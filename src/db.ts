@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS markets (
   criteria TEXT NOT NULL,
   evidence_source TEXT NOT NULL,
   close_at INTEGER NOT NULL,
+  timezone TEXT, -- IANA zone the market's times are shown in; NULL for markets made before zones
   subject_id INTEGER REFERENCES users(id),
   subject_opted_in_at INTEGER,
   status TEXT NOT NULL CHECK (status IN ('pending', 'open', 'closed', 'proposed', 'disputed', 'resolved')),
@@ -171,6 +172,12 @@ function migrateLedger(db: DB): void {
   })();
 }
 
+/** Adds a column that older databases lack (the table itself may not exist yet; SCHEMA creates it). */
+function addColumn(db: DB, table: string, column: string, type: string): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[];
+  if (cols.length && !cols.some((c) => c.name === column)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -178,6 +185,7 @@ export function openDb(path: string): DB {
   db.pragma('foreign_keys = ON');
   db.pragma('busy_timeout = 5000');
   migrateLedger(db);
+  addColumn(db, 'markets', 'timezone', 'TEXT'); // market time zones
   db.exec(SCHEMA);
   return db;
 }

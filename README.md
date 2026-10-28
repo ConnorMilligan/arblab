@@ -115,7 +115,7 @@ src/domain/          every rule, as plain functions taking (db, ..., now)
   resolution.ts      proposals, disputes, jury draw, voting, bond forfeiture
   tick.ts            applies every deadline that has passed; safe to run repeatedly
 src/views/           HTML templates (tagged template literals with auto-escaping)
-public/              style.css, app.js (time zone picker, local times, live clocks, close-time input)
+public/              style.css, app.js (time zone pickers, local times, live clocks)
 test/                vitest: domain rules plus HTTP tests against the real app
 ```
 
@@ -177,9 +177,9 @@ The spec left a few things open. These are the choices made (more detail in PLAN
   comes back; missed weeks aren't paid retroactively.
 - Times render in UTC on the server and switch to the viewer's time zone in the browser. That is the
   device's zone unless they pick another from the footer; the choice is saved per browser (not per
-  account). Market lists show each close time next to the countdown, and open markets show a live
-  "Your time now" clock beside the close time. Without JavaScript, times stay UTC and the close-time
-  input is read as UTC.
+  account). Each market has its own zone, chosen when it's created: its times show in the viewer's zone
+  first, with the market's local time underneath when that differs. Without JavaScript, times stay UTC
+  and a new market's zone starts on UTC.
 - The "no money talk" check on member-written text is a regex (currency symbols plus a short word
   list), not a moderation system.
 - CSRF protection is `SameSite=Lax` cookies plus an `Origin` check, not per-form tokens.

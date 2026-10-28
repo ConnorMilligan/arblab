@@ -1,7 +1,8 @@
 // Progressive enhancement only: every page works without this file.
 
 // Show times in the viewer's time zone (the server renders UTC). The zone is the device's own unless
-// they pick another in the footer; the choice is kept per browser.
+// they pick another in the footer; the choice is kept per browser. A market time shows the viewer's time
+// in bold, with the event's own time (data-zone) underneath when it reads differently.
 const TZ_KEY = 'arblab-tz';
 const deviceZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
 function validZone(z) {
@@ -24,19 +25,30 @@ let zone = savedZone() || deviceZone;
 const long = { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' };
 const short = { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' };
 function format(d, el) {
-  const style = el.hasAttribute('data-short') ? short : long;
-  const opts = el.hasAttribute('data-seconds') || el.hasAttribute('data-clock') ? { ...style, second: '2-digit' } : style;
-  return d.toLocaleString(undefined, { ...opts, timeZone: zone });
+  let opts = el.hasAttribute('data-short') ? short : long;
+  if (el.hasAttribute('data-seconds') || el.hasAttribute('data-clock')) opts = { ...opts, second: '2-digit' };
+  // The event's time is followed by its zone's name; the viewer's time beside it needs its zone shown, even when short.
+  if (el.dataset.zone) opts = { ...opts, timeZoneName: undefined };
+  else if (el.closest('[data-zoned]')) opts = { ...opts, timeZoneName: 'short' };
+  return d.toLocaleString(undefined, { ...opts, timeZone: el.dataset.zone || zone });
+}
+// Whether two zones show the same date and time at instant `d`.
+function sameWallClock(d, a, b) {
+  const f = (tz) => d.toLocaleString('en-US', { timeZone: tz, hourCycle: 'h23' });
+  return f(a) === f(b);
 }
 function localTimes(root) {
   for (const el of root.querySelectorAll('time[datetime]')) {
     const d = new Date(el.getAttribute('datetime'));
     if (Number.isNaN(d.getTime())) continue;
     el.dataset.utc ??= el.textContent;
-    el.title = el.dataset.utc;
+    if (!el.closest('[data-zoned]')) el.title = el.dataset.utc;
     el.textContent = format(d, el);
   }
-  for (const el of root.querySelectorAll('[data-tz-name]')) el.textContent = zone.replaceAll('_', ' ');
+  for (const el of root.querySelectorAll('[data-zoned]')) {
+    const event = el.querySelector('time[data-zone]');
+    el.querySelector('[data-event-time]').hidden = sameWallClock(new Date(event.getAttribute('datetime')), event.dataset.zone, zone);
+  }
 }
 localTimes(document);
 
@@ -53,14 +65,42 @@ if (clocks.length) {
   }, 1000);
 }
 
+// A zone's UTC offsets, week by week over the coming year: zones with the same pattern keep the same clock.
+const rulesCache = new Map();
+function zoneRules(z) {
+  if (!rulesCache.has(z)) {
+    const f = new Intl.DateTimeFormat('en-US', { timeZone: z, timeZoneName: 'longOffset' });
+    const week = 7 * 24 * 3600 * 1000;
+    const start = Date.now();
+    const offsets = [];
+    for (let t = start; t < start + 53 * week; t += week) offsets.push(f.formatToParts(t).find((p) => p.type === 'timeZoneName').value);
+    rulesCache.set(z, offsets.join());
+  }
+  return rulesCache.get(z);
+}
+
+// The picker lists one zone per set of clock rules (Europe/Paris stands for Amsterdam too): find the entry for `z`.
+function zoneOption(select, z) {
+  const options = [...select.options].filter((o) => o.value);
+  return options.find((o) => o.value === z) ?? options.find((o) => zoneRules(o.value) === zoneRules(z));
+}
+
+// A new market's zone starts as the viewer's own, until they pick one.
+const marketZone = document.querySelector('select[data-viewer-zone]');
+function presetMarketZone() {
+  const o = marketZone && zoneOption(marketZone, zone);
+  if (o) marketZone.value = o.value;
+}
+presetMarketZone();
+marketZone?.addEventListener('change', () => marketZone.removeAttribute('data-viewer-zone'));
+
 // Time zone picker in the footer: "Automatic" follows the device, anything else is remembered.
 const tzSelect = document.getElementById('tz');
-if (tzSelect && typeof Intl.supportedValuesOf === 'function') {
-  const zones = Intl.supportedValuesOf('timeZone');
-  if (!zones.includes('UTC')) zones.unshift('UTC');
-  tzSelect.add(new Option(`Automatic (${deviceZone.replaceAll('_', ' ')})`, ''));
-  for (const z of zones) tzSelect.add(new Option(z.replaceAll('_', ' '), z));
-  tzSelect.value = savedZone();
+if (tzSelect) {
+  const auto = zoneOption(tzSelect, deviceZone);
+  tzSelect.options[0].text = `Automatic: ${auto ? auto.text : deviceZone.replaceAll('_', ' ')}`;
+  const saved = savedZone();
+  tzSelect.value = saved ? (zoneOption(tzSelect, saved)?.value ?? '') : '';
   tzSelect.addEventListener('change', () => {
     try {
       if (tzSelect.value) localStorage.setItem(TZ_KEY, tzSelect.value);
@@ -70,34 +110,9 @@ if (tzSelect && typeof Intl.supportedValuesOf === 'function') {
     }
     zone = tzSelect.value || deviceZone;
     localTimes(document);
+    if (marketZone?.hasAttribute('data-viewer-zone')) presetMarketZone();
   });
   tzSelect.closest('label').hidden = false;
-}
-
-// How far `tz` is ahead of UTC at instant `t`, in ms.
-function zoneOffset(t, tz) {
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: tz, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric',
-  }).formatToParts(t);
-  const p = Object.fromEntries(parts.map((x) => [x.type, Number(x.value)]));
-  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - Math.floor(t / 1000) * 1000;
-}
-
-// A datetime-local value is a wall-clock time in the chosen zone; find the instant it means.
-// The second pass corrects for a DST change between the guess and the answer.
-function wallTimeToEpoch(value) {
-  const asUtc = Date.parse(`${value}Z`);
-  if (Number.isNaN(asUtc)) return NaN;
-  const guess = asUtc - zoneOffset(asUtc, zone);
-  return asUtc - zoneOffset(guess, zone);
-}
-
-// Send the exact instant alongside the typed wall-clock time.
-for (const input of document.querySelectorAll('input[data-epoch]')) {
-  input.form.addEventListener('submit', () => {
-    const t = wallTimeToEpoch(input.value);
-    input.form.elements[input.dataset.epoch].value = Number.isNaN(t) ? '' : String(t);
-  });
 }
 
 // Select an invite link on focus so it is easy to copy.

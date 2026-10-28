@@ -10,6 +10,7 @@ import {
   cleanText,
   rule,
 } from './rules.ts';
+import { isTimeZone } from '../time.ts';
 import { getUser } from './users.ts';
 
 export type MarketStatus = 'pending' | 'open' | 'closed' | 'proposed' | 'disputed' | 'resolved';
@@ -21,6 +22,7 @@ export interface Market {
   criteria: string;
   evidence_source: string;
   close_at: number;
+  timezone: string | null;
   subject_id: number | null;
   subject_opted_in_at: number | null;
   status: MarketStatus;
@@ -37,6 +39,8 @@ export interface MarketInput {
   criteria: string;
   evidenceSource: string;
   closeAt: number;
+  /** IANA zone the close time was typed in, and that the market shows its times in. */
+  timeZone: string;
   subjectId: number | null;
   attestations: string[];
 }
@@ -56,6 +60,7 @@ export function createMarket(db: DB, creatorId: number, input: MarketInput, now:
   const question = cleanText(input.question, 'Question', 10, 200);
   const criteria = cleanText(input.criteria, 'Resolution criteria', 10, 1000);
   const evidence = cleanText(input.evidenceSource, 'Evidence source', 3, 300);
+  rule(isTimeZone(input.timeZone), 'Pick a time zone.');
   rule(Number.isFinite(input.closeAt), 'Pick a trading close time.');
   rule(input.closeAt >= now + MIN_CLOSE_DELAY, 'Trading must stay open for at least an hour.');
   rule(input.closeAt <= now + MAX_CLOSE_DELAY, 'Trading must close within a year.');
@@ -76,11 +81,11 @@ export function createMarket(db: DB, creatorId: number, input: MarketInput, now:
   const attestation = JSON.stringify(ATTESTATIONS.map((a) => a.text));
   const res = db
     .prepare(
-      `INSERT INTO markets (creator_id, question, criteria, evidence_source, close_at, subject_id,
+      `INSERT INTO markets (creator_id, question, criteria, evidence_source, close_at, timezone, subject_id,
          subject_opted_in_at, status, attestation, attested_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(creatorId, question, criteria, evidence, input.closeAt, input.subjectId, optedInAt, status, attestation, now, now);
+    .run(creatorId, question, criteria, evidence, input.closeAt, input.timeZone, input.subjectId, optedInAt, status, attestation, now, now);
   return Number(res.lastInsertRowid);
 }
 

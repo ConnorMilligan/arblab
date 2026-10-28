@@ -63,7 +63,8 @@ const marketForm = (extra: Record<string, string> = {}) => ({
   question: 'Will Sam finish the crossword today?',
   criteria: 'YES if Sam posts a completed grid in the chat.',
   evidence_source: 'The group chat',
-  close_at_ms: String(T0 + DAY),
+  close_local: '2026-10-27T12:00', // T0 + DAY
+  timezone: 'UTC',
   attest: ATTESTATIONS.map((a) => a.key),
   ...extra,
 });
@@ -308,6 +309,37 @@ describe('markets over HTTP', () => {
     const page = await a.text(created.headers.get('location')!);
     expect(page).not.toContain('<script>alert(1)');
     expect(page).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
+  });
+
+  it('reads the close time in the chosen zone and shows the market in it', async () => {
+    member('Admin', true);
+    const a = client();
+    await a.login('Admin');
+    const created = await a.post('/markets', marketForm({ close_local: '2026-10-28T09:00', timezone: 'Asia/Tokyo' }));
+    const id = Number(created.headers.get('location')!.split('/').pop());
+    expect(getMarket(db, id)).toMatchObject({ close_at: Date.UTC(2026, 9, 28, 0), timezone: 'Asia/Tokyo' });
+    const page = await a.text(`/markets/${id}`);
+    expect(page).toContain('data-zone="Asia/Tokyo"');
+    expect(page).toContain('Japan &amp; Korea Time');
+  });
+
+  it('rejects a time zone it does not know', async () => {
+    member('Admin', true);
+    const a = client();
+    await a.login('Admin');
+    const res = await a.post('/markets', marketForm({ timezone: 'Mars/Olympus_Mons' }));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('Pick a time zone');
+  });
+
+  it('offers one entry per time zone, with major cities, on the new market form', async () => {
+    member('Admin', true);
+    const a = client();
+    await a.login('Admin');
+    const form = await a.text('/markets/new');
+    expect(form).toContain('<option value="America/New_York" >UTC−04:00 Eastern Time (New York, Toronto, Miami, Atlanta)</option>');
+    expect(form).toContain('<option value="UTC" selected>');
+    expect(form).toContain('data-viewer-zone');
   });
 
   it('applies deadlines lazily on the next request', async () => {

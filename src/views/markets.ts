@@ -3,7 +3,7 @@ import type { Dispute, Juror, Proposal } from '../domain/resolution.ts';
 import { ATTESTATIONS, DISPUTES_PER_WEEK, PROPOSAL_DEADLINE, QUORUM } from '../domain/rules.ts';
 import type { MemberRow } from '../domain/users.ts';
 import { type Html, html } from '../html.ts';
-import { type PageCtx, clock, linkify, marketList, outcomeRadios, page, poolBar, pts, signed, statusLine, until, when } from './layout.ts';
+import { type PageCtx, clock, linkify, marketList, outcomeRadios, page, poolBar, pts, signed, statusLine, until, when, zoneOptions, zonedWhen } from './layout.ts';
 
 const GROUPS: { key: MarketGroup; label: string; empty: string }[] = [
   { key: 'open', label: 'Open', empty: 'No open markets. Start one!' },
@@ -38,6 +38,7 @@ export interface NewMarketValues {
   criteria?: string;
   evidence_source?: string;
   close_local?: string;
+  timezone?: string;
   subject_id?: string;
 }
 
@@ -56,10 +57,14 @@ export function newMarketPage(ctx: PageCtx, members: MemberRow[], values: NewMar
   <label>Evidence source <small>Where the group will check: a link, a public record, a named person.</small>
     <input name="evidence_source" required minlength="3" maxlength="300" value="${values.evidence_source ?? ''}">
   </label>
-  <label>Trading closes <small>In <span data-tz-name>your local time</span>. No bets after this.</small>
-    <input type="datetime-local" name="close_local" required value="${values.close_local ?? ''}" data-epoch="close_at_ms">
-    <input type="hidden" name="close_at_ms">
-  </label>
+  <div class="pair">
+    <label>Trading closes <small>No bets after this.</small>
+      <input type="datetime-local" name="close_local" required value="${values.close_local ?? ''}">
+    </label>
+    <label>Time zone <small>Where the event happens. The close time is read in this zone.</small>
+      ${timeZoneSelect(ctx.now, values.timezone)}
+    </label>
+  </div>
   <label>Subject (optional) <small>If the market is about a member, name them. It stays pending until they opt in, and they can never bet on it.</small>
     <select name="subject_id">
       <option value="">Nobody in particular</option>
@@ -78,6 +83,11 @@ export function newMarketPage(ctx: PageCtx, members: MemberRow[], values: NewMar
   <button>Create market</button>
 </form>`,
   );
+}
+
+/** Without a value (a fresh form), app.js preselects the viewer's own zone; without JS it stays on UTC. */
+function timeZoneSelect(now: number, value: string | undefined): Html {
+  return html`<select name="timezone" required ${value ? '' : html`data-viewer-zone`}>${zoneOptions(now, value || 'UTC')}</select>`;
 }
 
 export interface MarketPageData {
@@ -112,7 +122,7 @@ export function marketPage(ctx: PageCtx, d: MarketPageData): string {
     : ''}
   <dt>Resolution criteria</dt><dd class="pre">${m.criteria}</dd>
   <dt>Evidence source</dt><dd>${linkify(m.evidence_source)}</dd>
-  <dt>Trading ${m.close_at > ctx.now ? 'closes' : 'closed'}</dt><dd>${when(m.close_at)}${m.close_at > ctx.now ? html` <span class="muted">(in ${until(m.close_at, ctx.now)})</span>` : ''}</dd>
+  <dt>Trading ${m.close_at > ctx.now ? 'closes' : 'closed'}</dt><dd>${zonedWhen(m.close_at, m.timezone, false, m.close_at > ctx.now ? `in ${until(m.close_at, ctx.now)}` : '')}</dd>
   ${m.close_at > ctx.now ? html`<dt>Your time now</dt><dd>${clock(ctx.now)}</dd>` : ''}
 </dl>
 

@@ -58,7 +58,7 @@ import {
   validatePassword,
 } from './domain/users.ts';
 import { LoginLimiter } from './ratelimit.ts';
-import { DAY, seasonOf } from './time.ts';
+import { DAY, seasonOf, wallTimeToEpoch } from './time.ts';
 import {
   leaderboardPage,
   loginPage,
@@ -401,11 +401,10 @@ export function createApp(opts: AppOptions): Hono<Env> {
       criteria: field(form, 'criteria'),
       evidence_source: field(form, 'evidence_source'),
       close_local: field(form, 'close_local'),
+      timezone: field(form, 'timezone'),
       subject_id: field(form, 'subject_id'),
     };
-    // app.js converts the local time to epoch ms; without JS the time is read as UTC.
-    const epoch = field(form, 'close_at_ms');
-    const closeAt = /^\d+$/.test(epoch) ? Number(epoch) : Date.parse(`${values.close_local}Z`);
+    const closeAt = wallTimeToEpoch(values.close_local, values.timezone);
     try {
       const id = db.transaction(() =>
         createMarket(
@@ -416,6 +415,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
             criteria: values.criteria,
             evidenceSource: values.evidence_source,
             closeAt,
+            timeZone: values.timezone,
             subjectId: values.subject_id ? toInt(values.subject_id) : null,
             attestations: fieldList(form, 'attest'),
           },
