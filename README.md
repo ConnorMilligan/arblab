@@ -1,5 +1,7 @@
 # Arblab
 
+[![Tests](https://github.com/ConnorMilligan/arblab/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/ConnorMilligan/arblab/actions/workflows/test.yml)
+
 A small, invite-only prediction market for a group of friends (up to 50). Members bet
 **play points** on yes/no questions, resolve them with a bonded propose/dispute/jury
 process, and compare results on a leaderboard.
