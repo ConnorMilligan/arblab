@@ -253,7 +253,9 @@ describe('invites over HTTP', () => {
     expect(page).toContain(`http://${HOST}/invite/${token}`);
 
     const friend = client();
-    expect(await friend.text(`/invite/${token}`)).toContain('I confirm I am 18 or older');
+    const signup = await friend.text(`/invite/${token}`);
+    expect(signup).toContain('I confirm I am 18 or older');
+    expect(signup).toContain('Please use your real name');
     const noAdult = await friend.post(`/invite/${token}`, { name: 'Newbie', password: 'long enough' });
     expect(noAdult.status).toBe(400);
     const ok = await friend.post(`/invite/${token}`, { name: 'Newbie', password: 'long enough', adult: 'yes' });
