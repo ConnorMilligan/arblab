@@ -1,6 +1,6 @@
 # Plan
 
-A small invite-only prediction market for up to 50 friends. Play points only.
+A small prediction market for up to 50 friends, signed in through Authelia. Play points only.
 
 ## Shape
 
@@ -16,13 +16,15 @@ A small invite-only prediction market for up to 50 friends. Play points only.
 
 ```
 src/server.ts          entry: open DB, start HTTP server, 5s tick
-src/app.ts             routes + session/CSRF middleware
+src/app.ts             routes + Authelia sign-in/CSRF middleware
 src/db.ts              schema (CREATE TABLE IF NOT EXISTS) + open helper
 src/html.ts            ~20-line escaping `html` tagged template
 src/time.ts            week/season boundaries, formatting
 src/domain/            points.ts, users.ts, markets.ts, payout.ts, resolution.ts, tick.ts
 src/views/             layout + page templates
-src/cli.ts             create-admin, reset-password, seed-demo
+src/cli.ts             link-login, seed-demo, backup
+src/directory.ts       Authelia users (login + name) for naming subjects who haven't joined;
+                       src/authelia-users.ts copies them out in a separate, network-less container
 public/style.css       < 200 lines
 public/app.js          time zone pickers + local-time display (the server reads the close time in the market's zone)
 test/*.test.ts         vitest
@@ -30,8 +32,7 @@ test/*.test.ts         vitest
 
 ## Schema
 
-- `users` (display_name unique, password_hash, is_admin, is_active, adult_confirmed_at, invited_by)
-- `invites` (token, created_by, expires_at, used_by, used_at)
+- `users` (display_name unique, auth_username = the Authelia login, is_admin, is_active, adult_confirmed_at)
 - `ledger` (user_id, type, amount, market_id, created_at). Append-only through
   `BEFORE UPDATE` / `BEFORE DELETE` triggers that abort. **Balances are always
   `SUM(amount)`**. No cached balance column, so nothing to reconcile.
@@ -99,8 +100,8 @@ For outcome YES/NO, with W = winning pool and L = losing pool, stakes added up p
 
 - **5,000 cap** limits the allowance top-up; winnings can take a balance above 5,000
   (a hard cap would destroy points out of a pool).
-- **50-member cap** counts *active* members, so deactivating someone frees a seat. Checked
-  when an invite is created and enforced inside the redemption transaction.
+- **50-member cap** counts *active* members, so deactivating someone frees a seat. Enforced
+  when someone joins on their first visit.
 - **Subject** can be the creator (creating it counts as opting in), cannot bet, cannot be a juror,
   may propose an outcome.
 - **Season** = calendar quarter (UTC). Leaderboard score = net points from resolved markets
@@ -111,5 +112,5 @@ For outcome YES/NO, with W = winning pool and L = losing pool, stakes added up p
 
 payout rounding/leftover, void refunds, bond forfeiture both ways + juror split, juror
 eligibility, subject betting block, auto-void (7d, 72h), allowance cap + idempotency,
-50-member cap + single-use invites, dispute weekly limit, ledger append-only, and an HTTP
+50-member cap, dispute weekly limit, ledger append-only, and an HTTP
 smoke test that renders every page and greps for banned money words.

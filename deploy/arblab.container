@@ -1,5 +1,5 @@
 [Unit]
-Description=arblab play-points prediction market
+Description=Dannymarket play-points prediction market
 Wants=network-online.target
 After=network-online.target
 

@@ -23,46 +23,16 @@ const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY,
   display_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  password_hash TEXT NOT NULL,
   is_admin INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1)),
   is_owner INTEGER NOT NULL DEFAULT 0 CHECK (is_owner IN (0, 1)), -- the one member who appoints and removes admins
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   adult_confirmed_at INTEGER NOT NULL,
-  invited_by INTEGER REFERENCES users(id),
-  session_version INTEGER NOT NULL DEFAULT 0,
-  created_at INTEGER NOT NULL
+  invited_by INTEGER REFERENCES users(id), -- from when members joined by invite link
+  created_at INTEGER NOT NULL,
+  auth_username TEXT -- the Authelia login (Remote-User) they sign in with; NULL until a pre-Authelia member is linked
 );
-
+CREATE UNIQUE INDEX IF NOT EXISTS users_auth_username ON users(auth_username COLLATE NOCASE);
 CREATE UNIQUE INDEX IF NOT EXISTS users_one_owner ON users(is_owner) WHERE is_owner = 1;
-
--- One row per login. The cookie names a row, so logging out revokes it server-side.
-CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  created_at INTEGER NOT NULL
-);
-
--- Admin-issued, single-use password reset links. Only a hash of the token is stored.
-CREATE TABLE IF NOT EXISTS password_resets (
-  id INTEGER PRIMARY KEY,
-  user_id INTEGER NOT NULL REFERENCES users(id),
-  token_hash TEXT NOT NULL UNIQUE,
-  created_by INTEGER NOT NULL REFERENCES users(id),
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  used_at INTEGER
-);
-
-CREATE TABLE IF NOT EXISTS invites (
-  id INTEGER PRIMARY KEY,
-  token TEXT NOT NULL UNIQUE,
-  created_by INTEGER NOT NULL REFERENCES users(id),
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  revoked_at INTEGER,
-  used_by INTEGER UNIQUE REFERENCES users(id),
-  used_at INTEGER
-);
 
 CREATE TABLE IF NOT EXISTS markets (
   id INTEGER PRIMARY KEY, -- internal only; pages and links use public_id
@@ -75,6 +45,8 @@ CREATE TABLE IF NOT EXISTS markets (
   close_at INTEGER NOT NULL,
   timezone TEXT, -- IANA zone the market's times are shown in; NULL for markets made before zones
   subject_id INTEGER REFERENCES users(id),
+  subject_login TEXT, -- an Authelia login named as subject before they joined; subject_id is set once they do
+  subject_login_name TEXT, -- their Authelia full name, shown until then
   subject_opted_in_at INTEGER,
   status TEXT NOT NULL CHECK (status IN ('pending', 'open', 'closed', 'proposed', 'disputed', 'resolved')),
   outcome TEXT CHECK (outcome IN ('YES', 'NO', 'VOID')),
@@ -211,6 +183,15 @@ function appointFirstOwner(db: DB): void {
   })();
 }
 
+/** Sign-in moved to Authelia: drop what passwords, sessions, invites and reset links needed. */
+function dropPasswordSignIn(db: DB): void {
+  const cols = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+  db.transaction(() => {
+    for (const col of ['password_hash', 'session_version']) if (cols.includes(col)) db.exec(`ALTER TABLE users DROP COLUMN ${col}`);
+    db.exec('DROP TABLE IF EXISTS sessions; DROP TABLE IF EXISTS password_resets; DROP TABLE IF EXISTS invites;');
+  })();
+}
+
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -219,10 +200,14 @@ export function openDb(path: string): DB {
   db.pragma('busy_timeout = 5000');
   migrateLedger(db);
   addColumn(db, 'markets', 'timezone', 'TEXT'); // market time zones
+  addColumn(db, 'users', 'auth_username', 'TEXT'); // signing in through Authelia
+  addColumn(db, 'markets', 'subject_login', 'TEXT'); // subjects who haven't joined yet
+  addColumn(db, 'markets', 'subject_login_name', 'TEXT');
   addColumn(db, 'markets', 'deleted_at', 'INTEGER'); // deleting markets
   addColumn(db, 'markets', 'deleted_by', 'INTEGER REFERENCES users(id)');
   giveMarketsPublicIds(db);
   appointFirstOwner(db);
+  dropPasswordSignIn(db);
   db.exec(SCHEMA);
   return db;
 }

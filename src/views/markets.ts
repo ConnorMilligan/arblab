@@ -1,3 +1,4 @@
+import type { DirectoryEntry } from '../directory.ts';
 import type { BetListRow, MarketGroup, MarketListRow } from '../domain/markets.ts';
 import type { Dispute, Juror, Proposal } from '../domain/resolution.ts';
 import { ATTESTATIONS, DISPUTES_PER_WEEK, PROPOSAL_DEADLINE, QUORUM } from '../domain/rules.ts';
@@ -42,7 +43,9 @@ export interface NewMarketValues {
   subject_id?: string;
 }
 
-export function newMarketPage(ctx: PageCtx, members: MemberRow[], values: NewMarketValues = {}): string {
+/** `notJoined`: people with a login for this server who aren't members yet; they can be named too. */
+export function newMarketPage(ctx: PageCtx, members: MemberRow[], notJoined: DirectoryEntry[], values: NewMarketValues = {}): string {
+  const option = (value: string, label: string) => html`<option value="${value}" ${value === values.subject_id ? 'selected' : ''}>${label}</option>`;
   return page(
     ctx,
     'New market',
@@ -65,12 +68,14 @@ export function newMarketPage(ctx: PageCtx, members: MemberRow[], values: NewMar
       ${timeZoneSelect(ctx.now, values.timezone)}
     </label>
   </div>
-  <label>Subject (optional) <small>If the market is about a member, name them. It stays pending until they opt in, and they can never bet on it.</small>
+  <label>Subject (optional) <small>If the market is about someone, name them. It stays pending until they opt in, and they can never bet on it.
+    Someone who hasn't joined yet is asked when they first sign in.</small>
     <select name="subject_id">
       <option value="">Nobody in particular</option>
-      ${members
-        .filter((m) => m.is_active)
-        .map((m) => html`<option value="${m.id}" ${String(m.id) === values.subject_id ? 'selected' : ''}>${m.display_name}</option>`)}
+      <optgroup label="Members">${members.filter((m) => m.is_active).map((m) => option(String(m.id), m.display_name))}</optgroup>
+      ${notJoined.length
+        ? html`<optgroup label="Not joined yet">${notJoined.map((e) => option(`login:${e.login}`, `${e.name} (not joined yet)`))}</optgroup>`
+        : ''}
     </select>
   </label>
   <fieldset>
@@ -123,7 +128,11 @@ ${m.deleted_at !== null
 <p>${statusLine(m, ctx.now)}</p>
 <dl>
   ${m.subject_name
-    ? html`<dt>Subject</dt><dd>${m.subject_name} ${m.subject_opted_in_at ? html`(opted in ${when(m.subject_opted_in_at)})` : '(has not opted in yet)'}</dd>`
+    ? html`<dt>Subject</dt><dd>${m.subject_name} ${m.subject_opted_in_at
+        ? html`(opted in ${when(m.subject_opted_in_at)})`
+        : m.subject_id === null
+          ? '(has not joined yet)'
+          : '(has not opted in yet)'}</dd>`
     : ''}
   <dt>Resolution criteria</dt><dd class="pre">${m.criteria}</dd>
   <dt>Evidence source</dt><dd>${linkify(m.evidence_source)}</dd>

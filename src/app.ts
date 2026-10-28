@@ -1,21 +1,18 @@
-import { getConnInfo } from '@hono/node-server/conninfo';
-import bcrypt from 'bcryptjs';
 import { type Context, Hono } from 'hono';
-import { deleteCookie, getCookie, getSignedCookie, setCookie, setSignedCookie } from 'hono/cookie';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
-import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { networkInterfaces } from 'node:os';
 import type { DB } from './db.ts';
+import type { DirectoryEntry } from './directory.ts';
 import {
   type MarketGroup,
   betsFor,
   createMarket,
   getMarket,
   getMarketRow,
-  listMarkets,
   marketIdFromUrl,
+  listMarkets,
   pendingOptIns,
   placeBet,
   positionsFor,
@@ -44,65 +41,32 @@ import {
 } from './domain/resolution.ts';
 import { DISPUTES_PER_WEEK, RuleError, parseOutcome, parseSide, rule } from './domain/rules.ts';
 import { tick } from './domain/tick.ts';
-import {
-  type User,
-  createInvite,
-  createPasswordReset,
-  getUser,
-  getUserByName,
-  listMembers,
-  openInvites,
-  redeemInvite,
-  redeemPasswordReset,
-  revokeInvite,
-  setActive,
-  setAdmin,
-  setPasswordHash,
-  usableInvite,
-  usableReset,
-  validateDisplayName,
-  validatePassword,
-} from './domain/users.ts';
-import { LoginLimiter } from './ratelimit.ts';
-import { DAY, seasonOf, wallTimeToEpoch } from './time.ts';
-import {
-  leaderboardPage,
-  loginPage,
-  mePage,
-  membersPage,
-  messagePage,
-  resetLinkPage,
-  resetPage,
-  rulesPage,
-  signupPage,
-} from './views/account.ts';
-import type { Flash, PageCtx } from './views/layout.ts';
+import { type User, createUser, getUser, getUserByAuthName, listMembers, setActive, setAdmin } from './domain/users.ts';
+import { seasonOf, wallTimeToEpoch } from './time.ts';
+import { leaderboardPage, mePage, membersPage, messagePage, rulesPage, welcomePage } from './views/account.ts';
+import { APP_NAME, type Flash, type PageCtx } from './views/layout.ts';
 import { rafflePage, raffleState } from './views/raffle.ts';
 import { type TodoItem, marketPage, marketsPage, newMarketPage } from './views/markets.ts';
 
 export interface AppOptions {
   db: DB;
-  /** Signs the session cookie. */
-  secret: string;
   secureCookies?: boolean;
   clock?: () => number;
-  bcryptCost?: number;
   rng?: Rng;
-  /** Public base URL used in invite links, e.g. https://arblab.fly.dev. Derived from the request if unset. */
-  appUrl?: string;
-  /** The connected peer's address. Defaults to the socket's; tests inject it. */
-  peerAddress?: (c: Context<Env>) => string | undefined;
+  /**
+   * The request header Caddy's forward_auth fills with the Authelia login (default Remote-User). It is trusted
+   * completely, so the app must be reachable only through that proxy, and the proxy must strip any copy a
+   * visitor sends.
+   */
+  userHeader?: string;
+  /** Where "Log out" goes, e.g. https://auth.example.com/logout. */
+  logoutUrl?: string;
+  /** Everyone with an Authelia login, so markets can name someone who hasn't joined yet. */
+  directory?: () => DirectoryEntry[];
 }
 
-type Env = { Variables: { now: number; user: User | null } };
+type Env = { Variables: { now: number; user: User | null; authName: string | null } };
 type Form = Record<string, string | File | (string | File)[]>;
-
-const ownAddresses = () =>
-  new Set(Object.values(networkInterfaces()).flatMap((list) => (list ?? []).map((i) => i.address)));
-
-const SESSION_COOKIE = 'session';
-const SESSION_TTL = 30 * DAY;
-const PUBLIC_PATHS = [/^\/login$/, /^\/invite\/[\w-]+$/, /^\/reset\/[\w-]+$/, /^\/rules$/];
 
 const field = (form: Form, key: string): string => {
   const v = Array.isArray(form[key]) ? form[key][0] : form[key];
@@ -113,31 +77,18 @@ const fieldList = (form: Form, key: string): string[] =>
 const toInt = (s: string): number => (/^\s*\d{1,9}\s*$/.test(s) ? Number(s) : NaN);
 
 export function createApp(opts: AppOptions): Hono<Env> {
-  const { db, secret } = opts;
+  const { db } = opts;
+  const userHeader = opts.userHeader ?? 'Remote-User';
   const clock = opts.clock ?? Date.now;
-  const cost = opts.bcryptCost ?? 11;
+  const directory = opts.directory ?? (() => []);
+  /** People with a login who haven't joined (or been linked) yet. */
+  const notJoined = () => directory().filter((e) => !getUserByAuthName(db, e.login));
   const secure = opts.secureCookies ?? false;
-  const peerOf =
-    opts.peerAddress ??
-    ((c: Context<Env>) => {
-      try {
-        return getConnInfo(c).remote.address;
-      } catch {
-        return undefined; // no socket (in-process requests)
-      }
-    });
-  const isHostPeer = (c: Context<Env>) => {
-    const peer = peerOf(c)?.replace(/^::ffff:/, '');
-    return !!peer && (peer === '::1' || peer.startsWith('127.') || ownAddresses().has(peer));
-  };
-  const prefix = secure ? 'host' : undefined; // __Host- cookies can't be set by sibling subdomains
-  const dummyHash = bcrypt.hashSync('not-the-password', cost);
   const assets = {
     'style.css': { body: readFileSync(new URL('../public/style.css', import.meta.url)), type: 'text/css; charset=utf-8' },
     'app.js': { body: readFileSync(new URL('../public/app.js', import.meta.url)), type: 'text/javascript; charset=utf-8' },
   };
 
-  const limiter = new LoginLimiter();
   const app = new Hono<Env>();
 
   app.use(
@@ -173,24 +124,12 @@ export function createApp(opts: AppOptions): Hono<Env> {
       console.error('tick failed', err);
     }
     if (c.req.method === 'POST' && !sameOrigin(c)) return c.text('Cross-site form posts are not allowed.', 403);
-    c.set('user', await sessionUser(c, now));
-    if (!c.get('user') && !PUBLIC_PATHS.some((p) => p.test(c.req.path))) return c.redirect('/login', 303);
+    const stop = signIn(c);
+    if (stop) return stop;
     await next();
   });
 
   // ---- helpers ----
-
-  /**
-   * The address the limiter keys on. Who is connected decides which header to believe:
-   * - A peer that is one of this container's own addresses (or loopback) is the reverse proxy on
-   *   the host side of the published port. It may pass a client-sent Cf-Connecting-Ip through, so
-   *   use the last X-Forwarded-For entry, which the proxy sets from the real peer.
-   * - Any other peer came over the container network, where the tunnel sets Cf-Connecting-Ip itself.
-   */
-  function clientIp(c: Context<Env>): string {
-    if (isHostPeer(c)) return c.req.header('x-forwarded-for')?.split(',').pop()?.trim() || 'local';
-    return c.req.header('cf-connecting-ip') ?? 'unknown';
-  }
 
   function sameOrigin(c: Context<Env>): boolean {
     const origin = c.req.header('origin');
@@ -202,35 +141,20 @@ export function createApp(opts: AppOptions): Hono<Env> {
     }
   }
 
-  async function readSession(c: Context<Env>): Promise<{ id: number; version: number; issuedAt: number; sid: string } | null> {
-    const raw = await getSignedCookie(c, secret, SESSION_COOKIE, prefix);
-    if (!raw) return null;
-    const [id, version, issuedAt, sid] = raw.split(':');
-    return sid ? { id: Number(id), version: Number(version), issuedAt: Number(issuedAt), sid } : null;
-  }
-
-  async function sessionUser(c: Context<Env>, now: number): Promise<User | null> {
-    const s = await readSession(c);
-    if (!s || !(s.issuedAt + SESSION_TTL > now)) return null;
-    const live = db.prepare('SELECT 1 FROM sessions WHERE id = ? AND user_id = ?').get(s.sid, s.id);
-    const user = getUser(db, s.id);
-    return live && user && user.is_active && user.session_version === s.version ? user : null;
-  }
-
-  async function startSession(c: Context<Env>, userId: number): Promise<void> {
-    const u = getUser(db, userId)!;
-    const now = c.get('now');
-    const sid = randomBytes(24).toString('base64url');
-    db.prepare('DELETE FROM sessions WHERE created_at <= ?').run(now - SESSION_TTL);
-    db.prepare('INSERT INTO sessions (id, user_id, created_at) VALUES (?, ?, ?)').run(sid, u.id, now);
-    await setSignedCookie(c, SESSION_COOKIE, `${u.id}:${u.session_version}:${now}:${sid}`, secret, {
-      httpOnly: true,
-      secure,
-      sameSite: 'Lax',
-      path: '/',
-      maxAge: SESSION_TTL / 1000,
-      prefix,
-    });
+  /**
+   * Authelia is the sign-in: Caddy sets the header on every request from the signed-in login, so it is the
+   * session. A login with no member yet goes to /welcome. Returns a response when the request stops here.
+   */
+  function signIn(c: Context<Env>): Response | undefined {
+    const authName = c.req.header(userHeader)?.trim() || null;
+    const user = authName ? getUserByAuthName(db, authName) : undefined;
+    c.set('authName', authName);
+    c.set('user', user?.is_active ? user : null);
+    const path = c.req.path;
+    if (path === '/rules') return;
+    if (!authName) return c.html(messagePage(ctx(c), 'Sign in', `Sign in with your login for this server to use ${APP_NAME}.`), 401);
+    if (user && !user.is_active) return c.html(messagePage(ctx(c), 'Account deactivated', 'This account has been deactivated.'), 403);
+    if (!user && path !== '/welcome') return c.redirect('/welcome', 303);
   }
 
   function flash(c: Context<Env>, kind: Flash['kind'], message: string): void {
@@ -255,6 +179,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
       now: c.get('now'),
       flash: f,
       viewer: u ? { id: u.id, name: u.display_name, isAdmin: !!u.is_admin, isOwner: !!u.is_owner, balance: balanceOf(db, u.id) } : null,
+      logoutUrl: opts.logoutUrl,
     };
   }
 
@@ -270,120 +195,35 @@ export function createApp(opts: AppOptions): Hono<Env> {
     return c.redirect(to, 303);
   }
 
-  function baseUrl(c: Context<Env>): string {
-    if (opts.appUrl) return opts.appUrl.replace(/\/$/, '');
-    const proto = c.req.header('x-forwarded-proto') ?? new URL(c.req.url).protocol.replace(':', '');
-    return `${proto}://${c.req.header('host')}`;
-  }
-
   /** The market's internal id from the public id in its URL (NaN, so "No such market", if there's none). */
   const marketId = (c: Context<Env>) => marketIdFromUrl(db, c.req.param('id') ?? '');
   const backTo = (c: Context<Env>) => `/markets/${encodeURIComponent(c.req.param('id') ?? '')}`;
 
-  // ---- login, invites, sign-up ----
+  // ---- first visit through Authelia ----
 
-  app.get('/login', (c) => (c.get('user') ? c.redirect('/') : c.html(loginPage(ctx(c)))));
+  // Authelia's Remote-Name (the person's full name) is a good first guess at a display name.
+  const suggestedName = (c: Context<Env>) => (c.req.header('remote-name') ?? '').trim().slice(0, 24);
+  const welcome = (c: Context<Env>, status: 200 | 400 = 200, error?: string, name = suggestedName(c)) =>
+    c.html(welcomePage(ctx(c, error ? { kind: 'error', message: error } : undefined), c.get('authName')!, name), status);
 
-  app.post('/login', async (c) => {
-    const form = await c.req.parseBody();
-    const name = field(form, 'name');
-    // Keyed on the submitted name, whether or not it exists, so the response never reveals members.
-    const ip = clientIp(c);
-    const wait = limiter.retryAfter(name, ip, c.get('now'));
-    if (wait > 0) {
-      c.header('Retry-After', String(wait));
-      return c.html(
-        loginPage(ctx(c, { kind: 'error', message: `Too many failed attempts. Try again in ${Math.ceil(wait / 60)} minute(s).` }), name),
-        429,
-      );
-    }
-    const user = getUserByName(db, name);
-    const ok = await bcrypt.compare(field(form, 'password'), user?.password_hash ?? dummyHash);
-    if (!user || !ok) {
-      limiter.fail(name, ip, c.get('now'));
-      return c.html(loginPage(ctx(c, { kind: 'error', message: 'Wrong name or password.' }), name), 401);
-    }
-    if (!user.is_active) return c.html(loginPage(ctx(c, { kind: 'error', message: 'This account has been deactivated.' }), name), 403);
-    limiter.succeed(name, ip);
-    await startSession(c, user.id);
-    return c.redirect('/', 303);
-  });
+  app.get('/welcome', (c) => (c.get('user') ? c.redirect('/', 303) : welcome(c)));
 
-  app.post('/logout', async (c) => {
-    const s = await readSession(c);
-    if (s) db.prepare('DELETE FROM sessions WHERE id = ?').run(s.sid);
-    deleteCookie(c, SESSION_COOKIE, { path: '/', secure, prefix });
-    return c.redirect('/login', 303);
-  });
-
-  app.get('/reset/:token', (c) => {
-    c.header('Cache-Control', 'no-store');
-    try {
-      const { user } = usableReset(db, c.req.param('token'), c.get('now'));
-      return c.html(resetPage(ctx(c), c.req.param('token'), user.display_name));
-    } catch (err) {
-      if (!(err instanceof RuleError)) throw err;
-      return c.html(messagePage(ctx(c), 'Reset password', err.message), 404);
-    }
-  });
-
-  app.post('/reset/:token', async (c) => {
-    c.header('Cache-Control', 'no-store');
-    const token = c.req.param('token');
-    const form = await c.req.parseBody();
-    try {
-      const { user } = usableReset(db, token, c.get('now')); // fail fast before the slow hash
-      const password = field(form, 'password');
-      validatePassword(password);
-      rule(password === field(form, 'again'), 'The two passwords do not match.');
-      redeemPasswordReset(db, token, await bcrypt.hash(password, cost), clock());
-      limiter.succeed(user.display_name, clientIp(c));
-      flash(c, 'ok', 'Password changed. Log in with your new password.');
-      return c.redirect('/login', 303);
-    } catch (err) {
-      if (!(err instanceof RuleError)) throw err;
-      try {
-        const { user } = usableReset(db, token, c.get('now'));
-        return c.html(resetPage(ctx(c, { kind: 'error', message: err.message }), token, user.display_name), 400);
-      } catch {
-        return c.html(messagePage(ctx(c), 'Reset password', err.message), 404);
-      }
-    }
-  });
-
-  app.get('/invite/:token', (c) => {
-    try {
-      const inv = usableInvite(db, c.req.param('token'), c.get('now'));
-      return c.html(signupPage(ctx(c), inv.token, getUser(db, inv.created_by)!.display_name));
-    } catch (err) {
-      if (!(err instanceof RuleError)) throw err;
-      return c.html(messagePage(ctx(c), 'Invite', err.message), 404);
-    }
-  });
-
-  app.post('/invite/:token', async (c) => {
-    const token = c.req.param('token');
+  app.post('/welcome', async (c) => {
+    if (c.get('user')) return c.redirect('/', 303);
     const form = await c.req.parseBody();
     const name = field(form, 'name');
     try {
-      usableInvite(db, token, c.get('now')); // fail fast before the slow hash
-      validateDisplayName(name);
-      validatePassword(field(form, 'password'));
-      const hash = await bcrypt.hash(field(form, 'password'), cost);
-      const userId = redeemInvite(db, token, { name, passwordHash: hash, adult: field(form, 'adult') === 'yes' }, clock());
-      await startSession(c, userId);
+      const userId = db.transaction(() => {
+        // The first member of a new group owns it.
+        const first = !db.prepare('SELECT 1 FROM users LIMIT 1').get();
+        const adult = field(form, 'adult') === 'yes';
+        return createUser(db, { name, authUsername: c.get('authName')!, isOwner: first, adult }, c.get('now'));
+      })();
       flash(c, 'ok', `Welcome! You start with ${balanceOf(db, userId).toLocaleString('en-US')} points.`);
       return c.redirect('/', 303);
     } catch (err) {
       if (!(err instanceof RuleError)) throw err;
-      let inviter: string;
-      try {
-        inviter = getUser(db, usableInvite(db, token, c.get('now')).created_by)!.display_name;
-      } catch (dead) {
-        if (!(dead instanceof RuleError)) throw dead;
-        return c.html(messagePage(ctx(c), 'Invite', dead.message), 404);
-      }
-      return c.html(signupPage(ctx(c, { kind: 'error', message: err.message }), token, inviter, name), 400);
+      return welcome(c, 400, err.message, name);
     }
   });
 
@@ -400,7 +240,19 @@ export function createApp(opts: AppOptions): Hono<Env> {
     return c.html(marketsPage(ctx(c), group, listMarkets(db, group), todo));
   });
 
-  app.get('/markets/new', (c) => c.html(newMarketPage(ctx(c), listMembers(db))));
+  app.get('/markets/new', (c) => c.html(newMarketPage(ctx(c), listMembers(db), notJoined())));
+
+  /** The subject picker sends a member's id, or "login:<login>" for someone who hasn't joined. */
+  function subjectOf(value: string): { subjectId: number | null; subjectLogin: DirectoryEntry | null } {
+    if (!value) return { subjectId: null, subjectLogin: null };
+    if (!value.startsWith('login:')) return { subjectId: toInt(value), subjectLogin: null };
+    const login = value.slice('login:'.length);
+    const member = getUserByAuthName(db, login);
+    if (member) return { subjectId: member.id, subjectLogin: null }; // they joined after the form was loaded
+    const entry = directory().find((e) => e.login.toLowerCase() === login.toLowerCase());
+    rule(entry, 'Pick the subject from the list.');
+    return { subjectId: null, subjectLogin: entry };
+  }
 
   app.post('/markets', async (c) => {
     const form = await c.req.parseBody({ all: true });
@@ -424,7 +276,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
             evidenceSource: values.evidence_source,
             closeAt,
             timeZone: values.timezone,
-            subjectId: values.subject_id ? toInt(values.subject_id) : null,
+            ...subjectOf(values.subject_id),
             attestations: fieldList(form, 'attest'),
           },
           c.get('now'),
@@ -434,7 +286,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
       return c.redirect(`/markets/${getMarket(db, id).public_id}`, 303);
     } catch (err) {
       if (!(err instanceof RuleError)) throw err;
-      return c.html(newMarketPage(ctx(c, { kind: 'error', message: err.message }), listMembers(db), values), 400);
+      return c.html(newMarketPage(ctx(c, { kind: 'error', message: err.message }), listMembers(db), notJoined(), values), 400);
     }
   });
 
@@ -556,45 +408,13 @@ export function createApp(opts: AppOptions): Hono<Env> {
     return c.html(mePage(ctx(c), positionsFor(db, me), ledgerFor(db, me)));
   });
 
-  app.post('/me/password', async (c) => {
-    const form = await c.req.parseBody();
-    const user = c.get('user')!;
-    try {
-      if (!(await bcrypt.compare(field(form, 'current'), user.password_hash))) throw new RuleError('Current password is wrong.');
-      validatePassword(field(form, 'password'));
-      setPasswordHash(db, user.id, await bcrypt.hash(field(form, 'password'), cost));
-      await startSession(c, user.id); // other devices are logged out
-      flash(c, 'ok', 'Password changed.');
-    } catch (err) {
-      if (!(err instanceof RuleError)) throw err;
-      flash(c, 'error', err.message);
-    }
-    return c.redirect('/me', 303);
-  });
-
   app.get('/leaderboard', (c) => {
     const view = c.req.query('view') === 'all' ? 'all' : 'season';
     const season = seasonOf(c.get('now'));
     return c.html(leaderboardPage(ctx(c), view, season.label, leaderboard(db, view === 'all' ? 0 : season.start)));
   });
 
-  app.get('/members', (c) =>
-    c.html(membersPage(ctx(c), listMembers(db), openInvites(db, c.get('user')!.id, c.get('now')), baseUrl(c))),
-  );
-
-  app.post('/invites', (c) =>
-    act(c, '/members', (_form, user, now) => {
-      createInvite(db, user.id, now);
-      return 'Invite link created. Copy it from the list below.';
-    }),
-  );
-
-  app.post('/invites/:id/revoke', (c) =>
-    act(c, '/members', (_form, user, now) => {
-      revokeInvite(db, user.id, toInt(c.req.param('id')), now);
-      return 'Invite revoked.';
-    }),
-  );
+  app.get('/members', (c) => c.html(membersPage(ctx(c), listMembers(db))));
 
   for (const action of ['make-admin', 'remove-admin'] as const) {
     app.post(`/members/:id/${action}`, (c) =>
@@ -615,19 +435,6 @@ export function createApp(opts: AppOptions): Hono<Env> {
       }),
     );
   }
-
-  app.post('/members/:id/reset', (c) => {
-    try {
-      const target = getUser(db, toInt(c.req.param('id') ?? ''));
-      const { token, expiresAt } = createPasswordReset(db, c.get('user')!.id, target?.id ?? -1, c.get('now'));
-      c.header('Cache-Control', 'no-store');
-      return c.html(resetLinkPage(ctx(c), target!.display_name, `${baseUrl(c)}/reset/${token}`, expiresAt));
-    } catch (err) {
-      if (!(err instanceof RuleError)) throw err;
-      flash(c, 'error', err.message);
-      return c.redirect('/members', 303);
-    }
-  });
 
   app.get('/rules', (c) => c.html(rulesPage(ctx(c))));
 

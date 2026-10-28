@@ -8,7 +8,7 @@ import { T0 } from './helpers.ts';
 describe('seed-demo', () => {
   it('creates 6 members and 3 markets in different states', () => {
     const db = openDb(':memory:');
-    seedDemo(db, T0, 'hash');
+    seedDemo(db, T0);
     expect(db.prepare('SELECT COUNT(*) AS n FROM users').get()).toEqual({ n: 6 });
     expect(db.prepare('SELECT status FROM markets ORDER BY id').all()).toEqual([
       { status: 'proposed' },

@@ -9,7 +9,7 @@ import { DAY } from '../src/time.ts';
 export const T0 = Date.UTC(2026, 9, 26, 12);
 
 export function addUser(db: DB, name: string, now = T0): number {
-  return createUser(db, { name, passwordHash: 'not-a-real-hash', adult: true }, now);
+  return createUser(db, { name, authUsername: name.toLowerCase(), adult: true }, now);
 }
 
 /** A fresh in-memory database with `n` members named User1..UserN (ids 1..n). */

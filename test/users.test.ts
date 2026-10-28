@@ -7,31 +7,20 @@ import { openDb } from '../src/db.ts';
 import { MAX_MEMBERS } from '../src/domain/rules.ts';
 import {
   activeMemberCount,
-  createInvite,
-  createPasswordReset,
+  createUser,
   getUser,
-  redeemInvite,
-  redeemPasswordReset,
+  getUserByAuthName,
+  linkAuthUsername,
   setActive,
   setAdmin,
   setOwner,
-  usableReset,
 } from '../src/domain/users.ts';
-import { DAY, HOUR } from '../src/time.ts';
 import { T0, addUser, setup } from './helpers.ts';
-
-const newbie = (name: string) => ({ name, passwordHash: 'hash', adult: true });
 
 describe('member cap', () => {
   it('stops at 50 active members', () => {
-    const { db, ids } = setup(MAX_MEMBERS - 1);
-    const invite = createInvite(db, ids[0], T0);
-    const spare = createInvite(db, ids[0], T0);
-    redeemInvite(db, invite.token, newbie('Fiftieth'), T0);
+    const { db } = setup(MAX_MEMBERS);
     expect(activeMemberCount(db)).toBe(50);
-
-    expect(() => createInvite(db, ids[0], T0)).toThrow(/full/);
-    expect(() => redeemInvite(db, spare.token, newbie('Fifty-first'), T0)).toThrow(/full/);
     expect(() => addUser(db, 'Sneaky')).toThrow(/full/);
     expect(activeMemberCount(db)).toBe(50);
   });
@@ -45,34 +34,25 @@ describe('member cap', () => {
   });
 });
 
-describe('invites', () => {
-  it('are single-use', () => {
-    const { db, ids } = setup(2);
-    const inv = createInvite(db, ids[0], T0);
-    redeemInvite(db, inv.token, newbie('Gina'), T0);
-    expect(() => redeemInvite(db, inv.token, newbie('Hank'), T0)).toThrow(/already been used/);
+describe('joining', () => {
+  it('requires an 18+ confirmation, a unique name and a login with no account yet', () => {
+    const { db } = setup(1);
+    expect(() => createUser(db, { name: 'Kid', authUsername: 'kid', adult: false }, T0)).toThrow(/18/);
+    expect(() => createUser(db, { name: 'user1', authUsername: 'someone', adult: true }, T0)).toThrow(/taken/);
+    expect(() => createUser(db, { name: 'Someone', authUsername: 'USER1', adult: true }, T0)).toThrow(/already has an account/);
   });
+});
 
-  it('expire after 7 days', () => {
+describe('linking a login', () => {
+  it('lets a member from before Authelia sign in as a login, once each way', () => {
     const { db, ids } = setup(1);
-    const inv = createInvite(db, ids[0], T0);
-    expect(() => redeemInvite(db, inv.token, newbie('Late'), T0 + 7 * DAY)).toThrow(/expired/);
-  });
-
-  it('require an 18+ confirmation and a unique name', () => {
-    const { db, ids } = setup(1);
-    const inv = createInvite(db, ids[0], T0);
-    expect(() => redeemInvite(db, inv.token, { ...newbie('Kid'), adult: false }, T0)).toThrow(/18/);
-    expect(() => redeemInvite(db, inv.token, newbie('user1'), T0)).toThrow(/taken/);
-    redeemInvite(db, inv.token, newbie('Ivy'), T0); // the failed attempts did not use it up
-  });
-
-  it('only work while the inviter is active', () => {
-    const { db, ids } = setup(2);
-    db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(ids[0]);
-    const inv = createInvite(db, ids[1], T0);
-    setActive(db, ids[0], ids[1], false);
-    expect(() => redeemInvite(db, inv.token, newbie('Jo'), T0)).toThrow(/no longer valid/);
+    db.prepare("INSERT INTO users (display_name, adult_confirmed_at, created_at) VALUES ('Old Timer', ?, ?)").run(T0, T0);
+    const old = (db.prepare("SELECT id FROM users WHERE display_name = 'Old Timer'").get() as { id: number }).id;
+    expect(() => linkAuthUsername(db, old, 'user1')).toThrow(/already has an account/);
+    linkAuthUsername(db, old, 'oldtimer');
+    expect(getUserByAuthName(db, 'OldTimer')!.id).toBe(old);
+    expect(() => linkAuthUsername(db, old, 'other')).toThrow(/already linked/);
+    expect(() => linkAuthUsername(db, ids[0], 'other')).toThrow(/already linked/);
   });
 });
 
@@ -87,44 +67,34 @@ describe('admin', () => {
   });
 });
 
-describe('password reset links', () => {
-  const admin = (db: ReturnType<typeof setup>['db'], id: number) => db.prepare('UPDATE users SET is_admin = 1 WHERE id = ?').run(id);
+describe('migrations', () => {
+  it('drops passwords, sessions, invites and reset links from a database made before Authelia, keeping members', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'dannymarket-')), 'old.db');
+    const old = new Database(path);
+    old.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, display_name TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
+      is_admin INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, adult_confirmed_at INTEGER NOT NULL,
+      invited_by INTEGER REFERENCES users(id), session_version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`);
+    old.exec('CREATE TABLE sessions (id TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id), created_at INTEGER NOT NULL)');
+    old.exec('CREATE TABLE invites (id INTEGER PRIMARY KEY, token TEXT NOT NULL, created_by INTEGER NOT NULL REFERENCES users(id))');
+    old.exec("INSERT INTO users (display_name, password_hash, is_admin, adult_confirmed_at, created_at) VALUES ('connor', '$2b$hash', 1, 1, 1)");
+    old.exec("INSERT INTO sessions VALUES ('s1', 1, 1)");
+    old.close();
 
-  it('are admin-only, single-use, expire after an hour and replace earlier links', () => {
-    const { db, ids } = setup(3);
-    admin(db, ids[0]);
-    expect(() => createPasswordReset(db, ids[1], ids[2], T0)).toThrow(/admin/);
-
-    const first = createPasswordReset(db, ids[0], ids[2], T0);
-    const second = createPasswordReset(db, ids[0], ids[2], T0 + 1000);
-    expect(() => usableReset(db, first.token, T0 + 1000)).toThrow(/not valid/);
-    expect(usableReset(db, second.token, T0 + 1000).user.id).toBe(ids[2]);
-    expect(() => usableReset(db, second.token, T0 + HOUR + 1000)).toThrow(/not valid/);
-
-    redeemPasswordReset(db, second.token, 'new-hash', T0 + 2000);
-    expect(() => redeemPasswordReset(db, second.token, 'again', T0 + 3000)).toThrow(/not valid/);
-    expect(getUser(db, ids[2])!.password_hash).toBe('new-hash');
-  });
-
-  it('store only a hash of the token, and end the member\'s sessions', () => {
-    const { db, ids } = setup(2);
-    admin(db, ids[0]);
-    const { token } = createPasswordReset(db, ids[0], ids[1], T0);
-    expect(JSON.stringify(db.prepare('SELECT * FROM password_resets').all())).not.toContain(token);
-
-    db.prepare('INSERT INTO sessions (id, user_id, created_at) VALUES (?, ?, ?)').run('s1', ids[1], T0);
-    const before = getUser(db, ids[1])!.session_version;
-    redeemPasswordReset(db, token, 'h', T0);
-    expect(db.prepare('SELECT COUNT(*) AS n FROM sessions').get()).toEqual({ n: 0 });
-    expect(getUser(db, ids[1])!.session_version).toBe(before + 1);
-  });
-
-  it('do not work for deactivated members', () => {
-    const { db, ids } = setup(2);
-    admin(db, ids[0]);
-    expect(() => createPasswordReset(db, ids[0], ids[1], T0)).not.toThrow();
-    setActive(db, ids[0], ids[1], false);
-    expect(() => createPasswordReset(db, ids[0], ids[1], T0)).toThrow(/active/);
+    const db = openDb(path);
+    const cols = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+    expect(cols).not.toContain('password_hash');
+    expect(cols).not.toContain('session_version');
+    expect(cols).toContain('auth_username');
+    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+    expect(tables).not.toContain('sessions');
+    expect(tables).not.toContain('invites');
+    expect(db.prepare('SELECT display_name, is_admin, is_owner, auth_username FROM users').get()).toEqual({
+      display_name: 'connor',
+      is_admin: 1,
+      is_owner: 1, // the longest-standing admin becomes the owner
+      auth_username: null,
+    });
+    db.close();
   });
 });
 
@@ -148,24 +118,20 @@ describe('the owner and admins', () => {
   });
 
   it('stops an admin taking over: they can deactivate members, but not admins or the owner', () => {
-    const { db, owner, admin, cara, dan } = group();
+    const { db, owner, admin, cara } = group();
     setAdmin(db, owner, cara, true);
     expect(() => setActive(db, admin, cara, false)).toThrow(/Only the owner can deactivate an admin/);
     expect(() => setActive(db, admin, owner, false)).toThrow(/owner cannot be deactivated/);
     expect(() => setAdmin(db, admin, owner, false)).toThrow(/Only the owner/);
-    setActive(db, admin, dan, false);
-    expect(getUser(db, dan)!.is_active).toBe(0);
     setActive(db, owner, cara, false); // the owner can
+    expect(getUser(db, cara)!.is_active).toBe(0);
     expect(() => setAdmin(db, owner, cara, true)).toThrow(/active/);
   });
 
-  it("stops an admin taking over through reset links: none for the owner, and only the owner's for admins", () => {
-    const { db, owner, admin, cara } = group();
-    expect(() => createPasswordReset(db, admin, owner, T0)).toThrow(/only be reset on the server/);
-    expect(() => createPasswordReset(db, owner, owner, T0)).toThrow(/only be reset on the server/);
-    setAdmin(db, owner, cara, true);
-    expect(() => createPasswordReset(db, admin, cara, T0)).toThrow(/Only the owner can reset an admin/);
-    expect(createPasswordReset(db, owner, cara, T0).token).toBeTruthy();
+  it('lets admins deactivate ordinary members', () => {
+    const { db, admin, dan } = group();
+    setActive(db, admin, dan, false);
+    expect(getUser(db, dan)!.is_active).toBe(0);
   });
 
   it('hands ownership over from the server, keeping the old owner an admin', () => {
@@ -174,21 +140,5 @@ describe('the owner and admins', () => {
     expect(getUser(db, cara)).toMatchObject({ is_owner: 1, is_admin: 1 });
     expect(getUser(db, owner)).toMatchObject({ is_owner: 0, is_admin: 1 });
     expect(() => db.prepare('UPDATE users SET is_owner = 1 WHERE id = ?').run(owner)).toThrow(/UNIQUE/); // only ever one
-  });
-
-  it('makes the longest-standing admin of a group from before owners the owner', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'arblab-')), 'old.db');
-    const old = new Database(path);
-    old.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, display_name TEXT NOT NULL UNIQUE COLLATE NOCASE, password_hash TEXT NOT NULL,
-      is_admin INTEGER NOT NULL DEFAULT 0, is_active INTEGER NOT NULL DEFAULT 1, adult_confirmed_at INTEGER NOT NULL,
-      invited_by INTEGER REFERENCES users(id), session_version INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL)`);
-    old.exec("INSERT INTO users (display_name, password_hash, is_admin, adult_confirmed_at, created_at) VALUES ('Ann', 'h', 1, 1, 1), ('Bea', 'h', 0, 1, 2)");
-    old.close();
-    const db = openDb(path);
-    expect(db.prepare('SELECT display_name, is_owner FROM users ORDER BY id').all()).toEqual([
-      { display_name: 'Ann', is_owner: 1 },
-      { display_name: 'Bea', is_owner: 0 },
-    ]);
-    db.close();
   });
 });

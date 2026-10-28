@@ -1,5 +1,5 @@
 {
-  "name": "arblab",
+  "name": "dannymarket",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
-    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^13.0.3",
     "hono": "^4.13.14"
   },

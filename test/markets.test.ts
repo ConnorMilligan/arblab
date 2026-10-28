@@ -7,12 +7,15 @@ import { openDb } from '../src/db.ts';
 import {
   createMarket,
   getMarket,
+  getMarketRow,
   marketIdFromUrl,
+  pendingOptIns,
   placeBet,
   pools,
   publicIdForOldNumber,
   respondAsSubject,
 } from '../src/domain/markets.ts';
+import { createUser, getUserByName, linkAuthUsername } from '../src/domain/users.ts';
 import { tick } from '../src/domain/tick.ts';
 import { DAY, TIME_ZONES, timeZoneOptions, wallTimeToEpoch, zoneName } from '../src/time.ts';
 import { T0, makeMarket, setup } from './helpers.ts';
@@ -141,7 +144,7 @@ describe('time zones', () => {
 
   it('names zones', () => {
     expect(zoneName('Asia/Tokyo')).toBe('Japan & Korea Time');
-    expect(zoneName('America/Argentina/Buenos_Aires')).toBe('Buenos Aires time'); // not in the list
+    expect(zoneName('America/Argentina/Buenos_Aires')).toBe('Buenos Aires time'); // from the old picker
   });
 
   it('requires a known zone and stores it', () => {
@@ -171,9 +174,58 @@ describe('migrations', () => {
   });
 });
 
+describe('subjects who have not joined yet', () => {
+  const about = (subjectLogin: { login: string; name: string }) => ({
+    question: 'Will Danny run the marathon this year?',
+    criteria: 'YES if Danny finishes an official marathon before close.',
+    evidenceSource: 'Race results',
+    closeAt: T0 + 10 * DAY,
+    timeZone: 'UTC',
+    subjectId: null,
+    subjectLogin,
+    attestations: ['no_harm', 'no_crime', 'no_minors'],
+  });
+
+  it('wait, pending, and become theirs to opt in to when they join', () => {
+    const { db, ids } = setup(2);
+    const m = createMarket(db, ids[0], about({ login: 'danny', name: 'Danny Smith' }), T0);
+    expect(getMarket(db, m)).toMatchObject({ status: 'pending', subject_id: null, subject_login: 'danny' });
+    expect(getMarketRow(db, m).subject_name).toBe('Danny Smith');
+    expect(() => placeBet(db, m, ids[1], 'YES', 10, T0)).toThrow(/opt in/);
+
+    const danny = createUser(db, { name: 'Danny', authUsername: 'Danny', adult: true }, T0 + DAY);
+    expect(getMarket(db, m).subject_id).toBe(danny);
+    expect(getMarketRow(db, m).subject_name).toBe('Danny'); // their display name from now on
+    expect(pendingOptIns(db, danny).map((x) => x.id)).toEqual([m]);
+    respondAsSubject(db, m, danny, true, T0 + DAY);
+    expect(getMarket(db, m).status).toBe('open');
+  });
+
+  it('are claimed when a member from before Authelia is linked to the login', () => {
+    const { db, ids } = setup(1);
+    db.prepare("INSERT INTO users (display_name, adult_confirmed_at, created_at) VALUES ('connor', ?, ?)").run(T0, T0);
+    const connor = getUserByName(db, 'connor')!.id;
+    const m = createMarket(db, ids[0], about({ login: 'connorm', name: 'Connor M' }), T0);
+    linkAuthUsername(db, connor, 'connorm');
+    expect(getMarket(db, m).subject_id).toBe(connor);
+  });
+
+  it('cannot name a login that already has an account', () => {
+    const { db, ids } = setup(2);
+    expect(() => createMarket(db, ids[0], about({ login: 'user2', name: 'User Two' }), T0)).toThrow(/already joined/);
+  });
+
+  it('is cancelled at close if they never join', () => {
+    const { db, ids } = setup(1);
+    const m = createMarket(db, ids[0], about({ login: 'ghost', name: 'Ghost' }), T0);
+    tick(db, T0 + 10 * DAY);
+    expect(getMarket(db, m)).toMatchObject({ status: 'resolved', outcome: 'VOID' });
+  });
+});
+
 describe('public ids', () => {
   it('gives markets in a database from before random ids one, and keeps their number for old links', () => {
-    const path = join(mkdtempSync(join(tmpdir(), 'arblab-')), 'old.db');
+    const path = join(mkdtempSync(join(tmpdir(), 'dannymarket-')), 'old.db');
     const old = new Database(path);
     old.exec('CREATE TABLE markets (id INTEGER PRIMARY KEY, close_at INTEGER NOT NULL, status TEXT NOT NULL)');
     old.exec("INSERT INTO markets (close_at, status) VALUES (1, 'open'), (2, 'open')");

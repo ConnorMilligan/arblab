@@ -10,11 +10,13 @@ services:
     ports:
       - "${ARBLAB_BIND:-127.0.0.1}:${ARBLAB_PORT:-8080}:8080"
     environment:
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (openssl rand -hex 32)}
-      APP_URL: ${APP_URL:-}
       SECURE_COOKIES: ${SECURE_COOKIES:-}
+      USER_HEADER: ${USER_HEADER:-}
+      LOGOUT_URL: ${LOGOUT_URL:-}
+      AUTHELIA_USERS_JSON: /authelia-users/users.json
     volumes:
       - arblab-data:/data
+      - authelia-users:/authelia-users:ro
     # Hardening: nothing but /data and /tmp is writable, and the process gets no extra privileges.
     read_only: true
     tmpfs:
@@ -26,5 +28,33 @@ services:
     pids_limit: 200
     mem_limit: 512m
 
+  # Copies each Authelia user's login and full name out of Authelia's users file, so markets can name people
+  # who haven't joined yet. Only this container sees that file (and its password hashes): it has no network,
+  # and the app gets just the copy. Turn it on with COMPOSE_PROFILES=authelia-users in .env.
+  authelia-users:
+    profiles: [authelia-users]
+    image: arblab:latest
+    container_name: arblab-authelia-users
+    restart: unless-stopped
+    command: ["node", "src/authelia-users.ts", "/authelia/users.yml", "/authelia-users/users.json"]
+    network_mode: none
+    volumes:
+      # The directory, not the file: Authelia (or anything editing users) may replace the file.
+      - ${AUTHELIA_USERS_DIR:-/var/lib/authelia}:/authelia:ro
+      - authelia-users:/authelia-users
+    # Readable through Authelia's group rather than root's privileges.
+    group_add:
+      - "${AUTHELIA_GID:-0}"
+    healthcheck:
+      disable: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 20
+    mem_limit: 64m
+
 volumes:
   arblab-data:
+  authelia-users:

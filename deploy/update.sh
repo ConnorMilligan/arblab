@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Rebuild and restart arblab on the server. With --bump, first move the Dockerfile's base-image
+# Rebuild and restart Dannymarket on the server. With --bump, first move the Dockerfile's base-image
 # pin to the current digest of the same tag, so Node and Debian security patches get picked up.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -16,4 +16,4 @@ npm audit --omit=dev --audit-level=high || echo "WARNING: npm audit reported iss
 podman build -t localhost/arblab:latest .
 systemctl --user restart arblab.service
 sleep 4
-podman healthcheck run arblab && echo "arblab healthy"
+podman healthcheck run arblab && echo "Dannymarket healthy"

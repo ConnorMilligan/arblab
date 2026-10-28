@@ -5,7 +5,7 @@ import { impliedYes } from '../domain/payout.ts';
 import { type Html, html } from '../html.ts';
 import { formatDuration, formatInZone, formatUtc, timeZoneOptions, zoneName } from '../time.ts';
 
-export const APP_NAME = 'Arblab';
+export const APP_NAME = 'Dannymarket';
 
 // Static files are cached for an hour, so their URLs carry a hash of the content: an edit gets fetched at once.
 const assetUrl = (file: string): string => {
@@ -32,6 +32,8 @@ export interface PageCtx {
   viewer: Viewer | null;
   flash: Flash | null;
   now: number;
+  /** Authelia's logout page; without one there's no "Log out" link. */
+  logoutUrl?: string;
 }
 
 export function page(ctx: PageCtx, title: string, body: Html): string {
@@ -60,9 +62,9 @@ export function page(ctx: PageCtx, title: string, body: Html): string {
   </nav>
   <div class="me">
     <span id="balance" title="Play points. No cash value.">${pts(v.balance)}</span>
-    <form method="post" action="/logout"><button class="link">Log out ${v.name}</button></form>
+    ${ctx.logoutUrl ? html`<a href="${ctx.logoutUrl}">Log out ${v.name}</a>` : html`<span>${v.name}</span>`}
   </div>`
-    : html`<nav><a href="/login">Log in</a> <a href="/rules">Rules</a></nav>`}
+    : html`<nav><a href="/rules">Rules</a></nav>`}
 </header>
 <main>
 ${ctx.flash ? html`<p class="flash ${ctx.flash.kind}" role="status">${ctx.flash.message}</p>` : ''}

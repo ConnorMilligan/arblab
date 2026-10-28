@@ -10,9 +10,10 @@ import {
   cleanText,
   rule,
 } from './rules.ts';
-import { newPublicId } from '../ids.ts';
 import { isTimeZone } from '../time.ts';
-import { getUser } from './users.ts';
+import type { DirectoryEntry } from '../directory.ts';
+import { newPublicId } from '../ids.ts';
+import { getUser, getUserByAuthName } from './users.ts';
 
 export type MarketStatus = 'pending' | 'open' | 'closed' | 'proposed' | 'disputed' | 'resolved';
 
@@ -27,6 +28,8 @@ export interface Market {
   close_at: number;
   timezone: string | null;
   subject_id: number | null;
+  subject_login: string | null;
+  subject_login_name: string | null;
   subject_opted_in_at: number | null;
   status: MarketStatus;
   outcome: Outcome | null;
@@ -47,6 +50,8 @@ export interface MarketInput {
   /** IANA zone the close time was typed in, and that the market shows its times in. */
   timeZone: string;
   subjectId: number | null;
+  /** Someone with an Authelia login who hasn't joined yet, named instead of a member (subjectId null). */
+  subjectLogin?: DirectoryEntry | null;
   attestations: string[];
 }
 
@@ -93,15 +98,25 @@ export function createMarket(db: DB, creatorId: number, input: MarketInput, now:
     if (subject.id === creatorId) optedInAt = now;
     else status = 'pending';
   }
+  const login = input.subjectLogin ?? null;
+  if (login) {
+    rule(input.subjectId === null, 'Pick one subject.');
+    rule(!getUserByAuthName(db, login.login), 'That person has already joined. Pick them from the members.');
+    status = 'pending'; // they opt in once they've joined
+  }
 
   const attestation = JSON.stringify(ATTESTATIONS.map((a) => a.text));
   const res = db
     .prepare(
-      `INSERT INTO markets (public_id, creator_id, question, criteria, evidence_source, close_at, timezone, subject_id,
-         subject_opted_in_at, status, attestation, attested_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO markets (public_id, creator_id, question, criteria, evidence_source, close_at, timezone, subject_id, subject_login,
+         subject_login_name, subject_opted_in_at, status, attestation, attested_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
-    .run(newPublicId(), creatorId, question, criteria, evidence, input.closeAt, input.timeZone, input.subjectId, optedInAt, status, attestation, now, now);
+    .run(
+      newPublicId(),
+      creatorId, question, criteria, evidence, input.closeAt, input.timeZone, input.subjectId, login?.login ?? null,
+      login?.name ?? null, optedInAt, status, attestation, now, now,
+    );
   return Number(res.lastInsertRowid);
 }
 
@@ -185,7 +200,7 @@ const LIST_GROUPS = {
 export type MarketGroup = keyof typeof LIST_GROUPS;
 
 const LIST_SELECT = `
-  SELECT m.*, c.display_name AS creator_name, s.display_name AS subject_name,
+  SELECT m.*, c.display_name AS creator_name, COALESCE(s.display_name, m.subject_login_name) AS subject_name,
     (SELECT COALESCE(SUM(amount), 0) FROM bets WHERE market_id = m.id AND side = 'YES') AS yes_pool,
     (SELECT COALESCE(SUM(amount), 0) FROM bets WHERE market_id = m.id AND side = 'NO') AS no_pool
   FROM markets m JOIN users c ON c.id = m.creator_id LEFT JOIN users s ON s.id = m.subject_id`;

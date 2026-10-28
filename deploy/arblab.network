@@ -1,5 +1,5 @@
 [Unit]
-Description=arblab private network
+Description=Dannymarket private network
 
 [Network]
 NetworkName=arblab

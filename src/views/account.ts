@@ -7,66 +7,24 @@ import {
   MIN_BOND,
   WEEKLY_ALLOWANCE,
 } from '../domain/rules.ts';
-import type { Invite, MemberRow } from '../domain/users.ts';
+import type { MemberRow } from '../domain/users.ts';
 import { type Html, html } from '../html.ts';
 import { APP_NAME, type PageCtx, page, pts, signed, when } from './layout.ts';
 
-export function loginPage(ctx: PageCtx, name = ''): string {
+/** First visit through Authelia: become a member. */
+export function welcomePage(ctx: PageCtx, authName: string, name: string): string {
   return page(
     ctx,
-    'Log in',
-    html`<h1>Log in</h1>
-<form method="post" action="/login" class="stack narrow">
-  <label>Display name <input name="name" required autocomplete="username" value="${name}"></label>
-  <label>Password <input type="password" name="password" required autocomplete="current-password"></label>
-  <button>Log in</button>
-</form>
-<p class="muted">${APP_NAME} is invite-only. Ask a member for an invite link. Forgot your password? Ask the admin for a reset link.</p>`,
-  );
-}
-
-export function signupPage(ctx: PageCtx, token: string, inviter: string, name = ''): string {
-  return page(
-    ctx,
-    'Join',
-    html`<h1>Join ${APP_NAME}</h1>
-<p>${inviter} invited you to a private prediction market for friends. It runs on play points only:
+    'Welcome',
+    html`<h1>Welcome to ${APP_NAME}</h1>
+<p>You're signed in as <b>${authName}</b>. ${APP_NAME} is a private prediction market for friends. It runs on play points only:
    they have no cash value and can't be bought, sold, transferred or redeemed. Read the <a href="/rules">House Rules</a>.</p>
-<form method="post" action="/invite/${token}" class="stack narrow">
+<form method="post" action="/welcome" class="stack narrow">
   <label>Display name <small>Please use your real name, so everyone knows who's who. 2–24 characters. Others will see this.</small>
-    <input name="name" required minlength="2" maxlength="24" value="${name}" autocomplete="username" placeholder="e.g. Danny Smith"></label>
-  <label>Password <small>At least 8 characters.</small>
-    <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
+    <input name="name" required minlength="2" maxlength="24" value="${name}" placeholder="e.g. Danny Smith"></label>
   <label class="check"><input type="checkbox" name="adult" value="yes" required> I confirm I am 18 or older.</label>
   <button>Join</button>
 </form>`,
-  );
-}
-
-export function resetPage(ctx: PageCtx, token: string, name: string): string {
-  return page(
-    ctx,
-    'Reset password',
-    html`<h1>Reset password</h1>
-<p>Choose a new password for <b>${name}</b>. You will be logged out everywhere and asked to log in again.</p>
-<form method="post" action="/reset/${token}" class="stack narrow">
-  <label>New password <small>At least 8 characters.</small>
-    <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
-  <label>Repeat it <input type="password" name="again" required minlength="8" autocomplete="new-password"></label>
-  <button>Set password</button>
-</form>`,
-  );
-}
-
-export function resetLinkPage(ctx: PageCtx, name: string, link: string, expiresAt: number): string {
-  return page(
-    ctx,
-    'Reset link',
-    html`<h1>Reset link for ${name}</h1>
-<p>Send this to ${name} privately (not in a group chat). It works once and expires ${when(expiresAt)}.
-   It is shown only now. Making another link for ${name} cancels this one.</p>
-<ul class="invites"><li><input readonly value="${link}" aria-label="Reset link"></li></ul>
-<p><a href="/members">Back to members</a></p>`,
   );
 }
 
@@ -97,14 +55,7 @@ ${ledger.map(
   (l) => html`<tr><td>${when(l.created_at, true)}</td>
     <td>${LEDGER_LABELS[l.type]}${l.market_public_id ? html`<small><a href="/markets/${l.market_public_id}">${l.question}</a></small>` : ''}</td>
     <td class="num">${signed(l.amount)}</td><td class="num">${l.running.toLocaleString('en-US')}</td></tr>`,
-)}</tbody></table></div>
-
-<h2>Change password</h2>
-<form method="post" action="/me/password" class="stack narrow">
-  <label>Current password <input type="password" name="current" required autocomplete="current-password"></label>
-  <label>New password <input type="password" name="password" required minlength="8" autocomplete="new-password"></label>
-  <button>Change password</button>
-</form>`,
+)}</tbody></table></div>`,
   );
 }
 
@@ -127,32 +78,20 @@ ${rows.map(
   );
 }
 
-export function membersPage(ctx: PageCtx, members: MemberRow[], invites: Invite[], inviteBase: string): string {
+export function membersPage(ctx: PageCtx, members: MemberRow[]): string {
   const active = members.filter((m) => m.is_active).length;
   const admin = ctx.viewer!.isAdmin;
   return page(
     ctx,
     'Members',
     html`<h1>Members <small class="muted">${active} / ${MAX_MEMBERS}</small></h1>
-<div class="scroll"><table><thead><tr><th>Name</th><th>Joined</th><th>Invited by</th><th>Status</th>${admin ? html`<th></th>` : ''}</tr></thead><tbody>
+<div class="scroll"><table><thead><tr><th>Name</th><th>Joined</th><th>Status</th>${admin ? html`<th></th>` : ''}</tr></thead><tbody>
 ${members.map(
-  (m) => html`<tr><td>${m.display_name}${m.is_owner ? ' (owner)' : m.is_admin ? ' (admin)' : ''}</td><td>${when(m.created_at, true)}</td><td>${m.invited_by_name ?? '–'}</td>
+  (m) => html`<tr><td>${m.display_name}${m.is_owner ? ' (owner)' : m.is_admin ? ' (admin)' : ''}</td><td>${when(m.created_at, true)}</td>
     <td>${m.is_active ? 'Active' : 'Deactivated'}</td>
     ${admin ? html`<td>${memberActions(ctx, m)}</td>` : ''}</tr>`,
 )}</tbody></table></div>
-
-<h2>Invite someone</h2>
-<p>Invite links work once and expire after 7 days. The new member picks a display name and password and confirms they are 18 or older.</p>
-${active >= MAX_MEMBERS
-  ? html`<p class="notice">The group is full.</p>`
-  : html`<form method="post" action="/invites"><button>Create invite link</button></form>`}
-${invites.length
-  ? html`<h3>Your unused invites</h3><ul class="invites">${invites.map(
-      (i) => html`<li><input readonly value="${inviteBase}/invite/${i.token}" aria-label="Invite link">
-        <small>expires ${when(i.expires_at)}</small>
-        <form method="post" action="/invites/${i.id}/revoke"><button class="link">Revoke</button></form></li>`,
-    )}</ul>`
-  : ''}`,
+<p class="muted">Anyone with a login for this server can join. They pick a display name and confirm they are 18 or older on their first visit.</p>`,
   );
 }
 
@@ -162,11 +101,9 @@ function memberActions(ctx: PageCtx, m: MemberRow): Html | string {
   if (m.id === v.id || m.is_owner) return '';
   const button = (action: string, label: string) =>
     html`<form method="post" action="/members/${m.id}/${action}"><button class="link">${label}</button></form>`;
-  const mine = !m.is_admin || v.isOwner; // admins are the owner's to manage
-  const active = mine ? button(m.is_active ? 'deactivate' : 'reactivate', m.is_active ? 'Deactivate' : 'Reactivate') : '';
-  const reset = mine && m.is_active ? button('reset', 'Reset link') : '';
+  const active = !m.is_admin || v.isOwner ? button(m.is_active ? 'deactivate' : 'reactivate', m.is_active ? 'Deactivate' : 'Reactivate') : '';
   const role = !v.isOwner ? '' : m.is_admin ? button('remove-admin', 'Remove admin') : m.is_active ? button('make-admin', 'Make admin') : '';
-  return html`${active}${reset}${role}`;
+  return html`${active}${role}`;
 }
 
 export function rulesPage(ctx: PageCtx): string {
@@ -182,10 +119,10 @@ export function rulesPage(ctx: PageCtx): string {
 
 <h2>Membership</h2>
 <ul>
-  <li>Invite-only, 18+ only, at most ${MAX_MEMBERS} active members.</li>
-  <li>Any member can create a single-use invite link. Admins can deactivate members, delete markets that haven't been resolved, and create password reset links for members (a reset link lets whoever uses it set that member's password). They have no other special powers.</li>
-  <li>The owner is an admin who also makes members admins, takes that away, and is the only one who can deactivate an admin
-      or make a reset link for one. Nobody can deactivate or demote the owner.</li>
+  <li>Open to anyone with a login for this server, 18+ only, at most ${MAX_MEMBERS} active members.</li>
+  <li>Admins can deactivate members and delete markets that haven't been resolved. They have no other special powers.</li>
+  <li>The owner is an admin who also makes members admins, takes that away, and is the only one who can deactivate an admin.
+      Nobody can deactivate or demote the owner.</li>
 </ul>
 
 <h2>Points</h2>
