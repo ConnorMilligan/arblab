@@ -56,6 +56,7 @@ import {
   redeemPasswordReset,
   revokeInvite,
   setActive,
+  setAdmin,
   setPasswordHash,
   usableInvite,
   usableReset,
@@ -253,7 +254,7 @@ export function createApp(opts: AppOptions): Hono<Env> {
     return {
       now: c.get('now'),
       flash: f,
-      viewer: u ? { id: u.id, name: u.display_name, isAdmin: !!u.is_admin, balance: balanceOf(db, u.id) } : null,
+      viewer: u ? { id: u.id, name: u.display_name, isAdmin: !!u.is_admin, isOwner: !!u.is_owner, balance: balanceOf(db, u.id) } : null,
     };
   }
 
@@ -594,6 +595,17 @@ export function createApp(opts: AppOptions): Hono<Env> {
       return 'Invite revoked.';
     }),
   );
+
+  for (const action of ['make-admin', 'remove-admin'] as const) {
+    app.post(`/members/:id/${action}`, (c) =>
+      act(c, '/members', (_form, user) => {
+        const target = toInt(c.req.param('id') ?? '');
+        setAdmin(db, user.id, target, action === 'make-admin');
+        const name = getUser(db, target)!.display_name;
+        return action === 'make-admin' ? `${name} is now an admin.` : `${name} is no longer an admin.`;
+      }),
+    );
+  }
 
   for (const action of ['deactivate', 'reactivate'] as const) {
     app.post(`/members/:id/${action}`, (c) =>

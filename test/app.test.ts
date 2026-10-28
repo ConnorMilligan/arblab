@@ -245,6 +245,30 @@ describe('access', () => {
   });
 });
 
+describe('admins over HTTP', () => {
+  it('lets the owner appoint admins from the Members page, and nobody else', async () => {
+    const owner = createUser(db, { name: 'Owner', passwordHash: hash, isOwner: true, adult: true }, now);
+    const bob = member('Bob');
+    const cara = member('Cara');
+    const o = client();
+    await o.login('Owner');
+    expect(await o.text('/members')).toContain(`action="/members/${bob}/make-admin"`);
+    await o.post(`/members/${bob}/make-admin`, {});
+    expect(await o.text('/members')).toContain('Bob is now an admin.');
+
+    const b = client();
+    await b.login('Bob');
+    const page = await b.text('/members');
+    expect(page).not.toContain('make-admin');
+    expect(page).not.toContain(`/members/${owner}/`); // no buttons on the owner's row
+    expect(page).toContain(`action="/members/${cara}/deactivate"`);
+    await b.post(`/members/${cara}/make-admin`, {}); // hand-crafted: refused on the server
+    expect(await b.text('/members')).toContain('Only the owner can appoint or remove admins.');
+    await b.post(`/members/${owner}/reset`, {});
+    expect(await b.text('/members')).toContain('only be reset on the server');
+  });
+});
+
 describe('invites over HTTP', () => {
   it('lets a member invite a friend who signs up once', async () => {
     member('Admin', true);

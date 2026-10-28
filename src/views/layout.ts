@@ -19,6 +19,7 @@ export interface Viewer {
   id: number;
   name: string;
   isAdmin: boolean;
+  isOwner: boolean;
   balance: number;
 }
 

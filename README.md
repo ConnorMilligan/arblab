@@ -24,7 +24,7 @@ docker compose exec arblab node src/cli.ts create-admin YourName --adult  # prin
 
 Everyone else joins through single-use invite links from the Members page. To try it with demo data
 instead, run `docker compose exec arblab node src/cli.ts seed-demo` on an empty database
-(6 members, password "demo-password", Alice is admin, plus 3 markets).
+(6 members, password "demo-password", Alice is the owner, plus 3 markets).
 
 To update after pulling new code: `docker compose up -d --build`. The volume keeps the data.
 
@@ -34,8 +34,9 @@ Run these inside the container: `docker compose exec arblab node src/cli.ts <com
 
 | Command | What it does |
 | --- | --- |
-| `create-admin <name> --adult` | Create the first member (admin). Only works on an empty database. Set `ADMIN_PASSWORD` to choose the password. |
-| `reset-password <name>` | Print a new password for a member. For the admin's own forgotten password, or when the web portal isn't an option. |
+| `create-admin <name> --adult` | Create the first member, the owner. Only works on an empty database. Set `ADMIN_PASSWORD` to choose the password. |
+| `reset-password <name>` | Print a new password for a member. For the owner's own forgotten password, or when the web portal isn't an option. |
+| `set-owner <name>` | Hand ownership to another member. The owner appoints and removes admins; the previous owner stays an admin. |
 | `seed-demo` | Fill an empty database with demo data |
 | `backup <file>` | Write a consistent copy of the database |
 
@@ -166,7 +167,8 @@ The spec left a few things open. These are the choices made (more detail in PLAN
   no self-service password reset. A member who forgot their password asks the admin, who clicks
   "Reset link" next to their name on the Members page and sends them the link privately. The link works
   once, expires after an hour, is stored only as a hash, replaces any earlier link, and ends the
-  member's sessions when used. The admin's own password is reset with the `reset-password` CLI command.
+  member's sessions when used. Only the owner can make one for an admin, and the owner's own password is
+  reset with the `reset-password` CLI command.
 - Login rate limiting counts failures in memory over 15 minutes: 5 per name from one client address, 20 per address, and 30 per name overall. The address comes from `X-Forwarded-For` when the request comes from the host-side proxy, and from `Cf-Connecting-Ip` otherwise. There is no global cap, so one client cannot pause logins for everyone. A restart clears the counts.
 - Sessions are server-side rows: logging out, changing a password or deactivating a member revokes them.
 - Markets and bets can't be edited once created. No comments or discussion. A market's creator can delete

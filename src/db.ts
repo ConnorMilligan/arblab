@@ -25,12 +25,15 @@ CREATE TABLE IF NOT EXISTS users (
   display_name TEXT NOT NULL UNIQUE COLLATE NOCASE,
   password_hash TEXT NOT NULL,
   is_admin INTEGER NOT NULL DEFAULT 0 CHECK (is_admin IN (0, 1)),
+  is_owner INTEGER NOT NULL DEFAULT 0 CHECK (is_owner IN (0, 1)), -- the one member who appoints and removes admins
   is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
   adult_confirmed_at INTEGER NOT NULL,
   invited_by INTEGER REFERENCES users(id),
   session_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_one_owner ON users(is_owner) WHERE is_owner = 1;
 
 -- One row per login. The cookie names a row, so logging out revokes it server-side.
 CREATE TABLE IF NOT EXISTS sessions (
@@ -197,6 +200,17 @@ function giveMarketsPublicIds(db: DB): void {
   })();
 }
 
+/** Groups from before owners: the longest-standing active admin becomes the owner. */
+function appointFirstOwner(db: DB): void {
+  const cols = (db.prepare('PRAGMA table_info(users)').all() as { name: string }[]).map((c) => c.name);
+  if (!cols.length || cols.includes('is_owner')) return;
+  db.transaction(() => {
+    db.exec('ALTER TABLE users ADD COLUMN is_owner INTEGER NOT NULL DEFAULT 0 CHECK (is_owner IN (0, 1))');
+    db.exec(`UPDATE users SET is_owner = 1
+             WHERE id = (SELECT id FROM users WHERE is_admin = 1 AND is_active = 1 ORDER BY created_at, id LIMIT 1)`);
+  })();
+}
+
 export function openDb(path: string): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
@@ -208,6 +222,7 @@ export function openDb(path: string): DB {
   addColumn(db, 'markets', 'deleted_at', 'INTEGER'); // deleting markets
   addColumn(db, 'markets', 'deleted_by', 'INTEGER REFERENCES users(id)');
   giveMarketsPublicIds(db);
+  appointFirstOwner(db);
   db.exec(SCHEMA);
   return db;
 }

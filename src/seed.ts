@@ -8,12 +8,12 @@ import { DAY, HOUR } from './time.ts';
 
 export const DEMO_NAMES = ['Alice', 'Bob', 'Carol', 'Dev', 'Erin', 'Femi'];
 
-/** Six members (Alice is admin) and three markets: open, open with a subject, and awaiting resolution. */
+/** Six members (Alice is the owner) and three markets: open, open with a subject, and awaiting resolution. */
 export function seedDemo(db: DB, now: number, passwordHash: string): void {
   db.transaction(() => {
     const joined = now - 3 * DAY;
     const [alice, bob, carol, dev, erin, femi] = DEMO_NAMES.map((name, i) =>
-      createUser(db, { name, passwordHash, isAdmin: i === 0, adult: true }, joined),
+      createUser(db, { name, passwordHash, isOwner: i === 0, adult: true }, joined),
     );
     const attestations = ATTESTATIONS.map((a) => a.key);
 
